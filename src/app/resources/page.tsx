@@ -11,7 +11,7 @@ import {
   MessageCircle, Reply, Check,
   History, Hash, Calendar, FileEdit, Clock3,
   ArrowLeft, Maximize2, Minimize2, FilePlus,
-  MessageSquarePlus, Eye, FileCode
+  MessageSquarePlus, Eye, FileCode, User
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
