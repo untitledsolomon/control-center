@@ -315,7 +315,7 @@ function generateId(): string {
 
 // ─── Markdown Renderer ──────────────────────────────────────────────
 
-function renderMarkdownLine(line: string, index: number): { html: string; key: number } {
+function renderMarkdownLine(line: string, index: number): { html: string; key: number; isCodeBlock?: boolean } {
   // Headings
   if (line.startsWith('# ')) return { html: `<h1 class="text-[22px] font-bold text-foreground mt-6 mb-3">${line.slice(2)}</h1>`, key: index }
   if (line.startsWith('## ')) return { html: `<h2 class="text-[17px] font-semibold text-foreground mt-5 mb-2">${line.slice(3)}</h2>`, key: index }
