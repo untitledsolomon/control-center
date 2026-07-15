@@ -9,7 +9,8 @@ import {
   Settings, Sun, Moon, Monitor, Bell, Shield,
   Globe, Database, Webhook, Key, RefreshCw,
   CheckCircle, XCircle, Save, User, Palette,
-  Bot, Cpu, HardDrive, Clock, Mail, Smartphone
+  Bot, Cpu, HardDrive, Clock, Mail, Smartphone,
+  MessageSquare
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
@@ -513,6 +514,3 @@ export default function SettingsPage() {
     </div>
   )
 }
-
-// Need to import MessageSquare for the integrations
-import { MessageSquare } from 'lucide-react'

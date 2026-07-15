@@ -1,306 +1,363 @@
 'use client'
 
-import React from 'react'
-import { useApp } from '@/store/AppContext'
+import { useState, useEffect } from 'react'
+import { useAppState, weeklyData as mockWeekly, hourlyData as mockHourly } from '@/lib/store'
+import { Card, CardHeader, CardTitle, Badge, Button } from '@/components/ui'
+import { formatRelativeTime, cn, getGreeting, getStatusConfig } from '@/lib/utils'
 import {
-  CheckSquare,
-  Target,
-  Activity,
-  AlertTriangle,
-  Cpu,
-  Clock,
-  TrendingUp,
-  Zap,
-  ArrowUpRight,
-  ArrowDownRight,
+  CheckCircle, FileText, Users, AlertTriangle, Activity,
+  Target, RefreshCw, ChevronRight, Clock, Bot, Cpu, HardDrive
 } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area
+} from 'recharts'
+import { fetchDashboardStats, fetchWeeklyChartData, fetchHourlyChartData, fetchAgentStatus } from '@/lib/api-client'
+
+const iconMap: Record<string, React.ReactNode> = {
+  CheckCircle: <CheckCircle size={18} />,
+  FileText: <FileText size={18} />,
+  Users: <Users size={18} />,
+  AlertTriangle: <AlertTriangle size={18} />,
+}
+
+const colorMap: Record<string, string> = {
+  success: 'text-success',
+  accent: 'text-accent',
+  purple: 'text-purple',
+  error: 'text-error',
+}
 
 export default function DashboardPage() {
-  const { state } = useApp()
-  const { stats, weeklyActivity, hourlyActivity, goals, activityLogs, tasks, loading } = state
+  const { greeting, subtitle } = getGreeting()
+  const { state, addActivity, addNotification, refreshStats } = useAppState()
+  const { stats, alerts, activity, goals } = state
+  const [refreshing, setRefreshing] = useState(false)
+  const [expandedActivity, setExpandedActivity] = useState<string | null>(null)
+  const [lastSync, setLastSync] = useState(new Date())
+  const [weeklyData, setWeeklyData] = useState(mockWeekly)
+  const [hourlyData, setHourlyData] = useState(mockHourly)
+  const [liveStats, setLiveStats] = useState<{ label: string; value: number; icon: string; color: string }[] | null>(null)
+  const [agentInfo, setAgentInfo] = useState<{ status: string; uptime: number; cpu: number; mem: number } | null>(null)
 
-  if (loading || !stats) {
-    return <DashboardSkeleton />
+  // Load real data from DAWN API on mount
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      const [apiStats, apiWeekly, apiHourly, apiAgent] = await Promise.all([
+        fetchDashboardStats(),
+        fetchWeeklyChartData(),
+        fetchHourlyChartData(),
+        fetchAgentStatus(),
+      ])
+
+      if (cancelled) return
+
+      if (apiStats) {
+        setLiveStats([
+          { label: 'Tasks Completed', value: apiStats.tasks_completed, icon: 'CheckCircle', color: 'success' },
+          { label: 'Active Tasks', value: apiStats.tasks_in_progress, icon: 'FileText', color: 'accent' },
+          { label: 'Pending Tasks', value: apiStats.tasks_pending, icon: 'Users', color: 'purple' },
+          { label: 'Failed Tasks', value: apiStats.tasks_failed, icon: 'AlertTriangle', color: 'error' },
+        ])
+      }
+
+      if (apiWeekly && apiWeekly.length > 0) {
+        setWeeklyData(apiWeekly.map(d => ({
+          day: d.day,
+          tasks: d.tasks,
+          posts: d.posts,
+          leads: d.leads,
+        })))
+      }
+
+      if (apiHourly && apiHourly.length > 0) {
+        setHourlyData(apiHourly.map(d => ({
+          hour: d.hour,
+          value: d.value,
+        })))
+      }
+
+      if (apiAgent) {
+        setAgentInfo({
+          status: apiAgent.status,
+          uptime: apiAgent.uptime,
+          cpu: apiAgent.cpu_usage,
+          mem: apiAgent.memory_usage,
+        })
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [])
+
+  const handleRefresh = () => {
+    setRefreshing(true)
+    setTimeout(() => {
+      setRefreshing(false)
+      const now = new Date()
+      setLastSync(now)
+      addActivity({ timestamp: now, badge: 'TASK_COMPLETE', title: 'Briefing refreshed', description: 'Manual refresh — dashboard data synced and updated' })
+      addNotification({ type: 'update', icon: 'RefreshCw', title: 'Briefing refreshed', description: 'Dashboard data synced and updated', timestamp: now, screen: '/' })
+      refreshStats()
+    }, 1500)
   }
 
-  const tasksByStatus = [
-    { name: 'Completed', value: stats.tasks_completed, color: '#12b886' },
-    { name: 'In Progress', value: stats.tasks_in_progress, color: '#4c6ef5' },
-    { name: 'Pending', value: stats.tasks_pending, color: '#f59f00' },
-    { name: 'Failed', value: stats.tasks_failed, color: '#fa5252' },
-  ]
-
-  const completionRate = stats.total_tasks > 0
-    ? Math.round((stats.tasks_completed / stats.total_tasks) * 100)
-    : 0
+  const displayStats = liveStats || stats
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-content mx-auto px-4 md:px-8 py-6 md:py-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-xl font-semibold text-[#e6edf3]">Dashboard</h1>
-          <p className="text-sm text-[#8b949e] mt-1">
-            DAWN agent status: <span className="text-emerald-400 capitalize">{stats.agent_status}</span>
-          </p>
+          <h1 className="text-[28px] font-semibold text-foreground">{greeting}</h1>
+          <p className="text-[14px] text-muted mt-1">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#8b949e] bg-[#161b22] rounded-lg border border-[#30363d]">
-            <Clock className="w-3 h-3" />
-            Last active: {new Date(stats.last_active).toLocaleTimeString()}
+        <div className="flex items-center gap-3">
+          <span className="hidden md:inline text-[12px] text-muted font-medium tracking-wide">
+            Synced {formatRelativeTime(lastSync)}
           </span>
+          <button
+            onClick={handleRefresh}
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-all duration-150"
+            aria-label="Refresh"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
+
+      {/* Agent Status Bar */}
+      {agentInfo && (
+        <div className="mb-6 p-3 rounded-lg bg-accent-light border border-accent/20 flex items-center gap-4 text-[12px]">
+          <div className="flex items-center gap-2">
+            <Bot size={16} className="text-accent" />
+            <span className="font-medium text-accent">DAWN Agent</span>
+          </div>
+          <span className="text-muted">•</span>
+          <span className="text-foreground capitalize">{agentInfo.status}</span>
+          <span className="text-muted">•</span>
+          <div className="flex items-center gap-1 text-muted">
+            <Cpu size={14} />
+            <span>{agentInfo.cpu}% CPU</span>
+          </div>
+          <div className="flex items-center gap-1 text-muted">
+            <HardDrive size={14} />
+            <span>{agentInfo.mem}% MEM</span>
+          </div>
+          <span className="text-muted">•</span>
+          <span className="text-muted">Uptime: {Math.floor(agentInfo.uptime / 3600)}h {Math.floor((agentInfo.uptime % 3600) / 60)}m</span>
+        </div>
+      )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Total Tasks"
-          value={stats.total_tasks}
-          icon={CheckSquare}
-          color="text-dawn-400"
-          bg="bg-dawn-500/10"
-          trend={{ value: completionRate, label: 'completion rate', up: completionRate > 50 }}
-        />
-        <StatCard
-          title="Active Goals"
-          value={stats.active_goals}
-          icon={Target}
-          color="text-emerald-400"
-          bg="bg-emerald-500/10"
-          trend={{ value: stats.goal_progress_avg, label: 'avg progress', up: stats.goal_progress_avg > 50 }}
-        />
-        <StatCard
-          title="System Uptime"
-          value={`${stats.system_uptime}%`}
-          icon={TrendingUp}
-          color="text-violet-400"
-          bg="bg-violet-500/10"
-          trend={{ value: 0.2, label: 'vs last week', up: true }}
-        />
-        <StatCard
-          title="Unread Alerts"
-          value={stats.notifications_unread}
-          icon={AlertTriangle}
-          color="text-amber-400"
-          bg="bg-amber-500/10"
-          trend={{ value: stats.notifications_unread, label: 'needs attention', up: stats.notifications_unread > 5 }}
-        />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        {displayStats.map(stat => (
+          <Card key={stat.label} className="p-4 md:p-5">
+            <div className="flex items-center gap-3">
+              <div className={colorMap[stat.color]}>
+                {iconMap[stat.icon]}
+              </div>
+              <div>
+                <p className="text-[20px] font-semibold text-foreground">{stat.value}</p>
+                <p className="text-[12px] text-muted font-medium tracking-wide">{stat.label}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Weekly Activity */}
-        <div className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-medium text-[#e6edf3]">Weekly Activity</h3>
-            <div className="flex items-center gap-3 text-[10px] text-[#6e7681]">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-dawn-500" />
-                Created
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                Completed
-              </span>
+      {/* Weekly Performance + Recent Activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <Card className="lg:col-span-2 p-5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Activity size={16} className="text-accent" />
+              <CardTitle>Weekly Performance</CardTitle>
             </div>
-          </div>
-          <div className="h-64">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-accent" />
+                <span className="text-[11px] text-muted">Tasks</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-pink/60" />
+                <span className="text-[11px] text-muted">Posts</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-purple/60" />
+                <span className="text-[11px] text-muted">Leads</span>
+              </div>
+            </div>
+          </CardHeader>
+          <div className="h-[220px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyActivity}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-                <XAxis dataKey="date" stroke="#6e7681" fontSize={12} />
-                <YAxis stroke="#6e7681" fontSize={12} />
-                <Tooltip
-                  contentStyle={{
-                    background: '#161b22',
-                    border: '1px solid #30363d',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                  }}
-                  labelStyle={{ color: '#e6edf3' }}
-                />
-                <Bar dataKey="tasks_created" fill="#4c6ef5" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="tasks_completed" fill="#12b886" radius={[4, 4, 0, 0]} />
+              <BarChart data={weeklyData} barGap={4}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E5EC" vertical={false} />
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6B7280' }} />
+                <Tooltip contentStyle={{ background: '#FFFFFF', border: '1px solid #E2E5EC', borderRadius: 8, fontSize: 12 }} />
+                <Bar dataKey="tasks" fill="#5B6EF5" radius={[4, 4, 0, 0]} maxBarSize={20} />
+                <Bar dataKey="posts" fill="#DB2777" radius={[4, 4, 0, 0]} maxBarSize={20} />
+                <Bar dataKey="leads" fill="#7C3AED" radius={[4, 4, 0, 0]} maxBarSize={20} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </Card>
 
-        {/* Hourly Activity */}
-        <div className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-medium text-[#e6edf3]">Hourly Requests</h3>
-            <div className="flex items-center gap-1 text-[10px] text-[#6e7681]">
-              <span className="w-2 h-2 rounded-full bg-dawn-500" />
-              Response time
+        <Card className="p-5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Activity size={16} className="text-accent" />
+              <CardTitle>Recent Activity</CardTitle>
             </div>
+          </CardHeader>
+          <div className="space-y-1 -mx-1">
+            {activity.slice(0, 5).map(act => (
+              <div key={act.id} className="border-b border-border last:border-b-0">
+                <button
+                  onClick={() => setExpandedActivity(expandedActivity === act.id ? null : act.id)}
+                  className="w-full flex items-center gap-2.5 px-2 py-2.5 text-left hover:bg-surface transition-colors rounded"
+                >
+                  <Badge
+                    variant={act.badge === 'TASK_COMPLETE' ? 'success' : act.badge === 'OUTREACH_SENT' ? 'accent' : act.badge === 'CONTENT_POSTED' ? 'pink' : act.badge === 'LEAD_SCRAPED' ? 'purple' : 'error'}
+                  >
+                    {act.badge === 'TASK_COMPLETE' ? '✓' : act.badge === 'OUTREACH_SENT' ? '→' : act.badge === 'CONTENT_POSTED' ? '📄' : act.badge === 'LEAD_SCRAPED' ? '👤' : '⚠'}
+                  </Badge>
+                  <span className="flex-1 text-[12px] text-foreground font-medium truncate">{act.title}</span>
+                  <span className="text-[10px] text-muted whitespace-nowrap">{formatRelativeTime(act.timestamp)}</span>
+                </button>
+                {expandedActivity === act.id && (
+                  <p className="px-2 pb-2 text-[11px] text-muted leading-relaxed animate-fade-in">{act.description}</p>
+                )}
+              </div>
+            ))}
           </div>
-          <div className="h-64">
+          <a href="/queue" className="block mt-3 text-center text-[12px] text-accent font-medium hover:underline">
+            View all tasks →
+          </a>
+        </Card>
+      </div>
+
+      {/* Needs Attention */}
+      {alerts.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-[16px] font-semibold text-foreground mb-4 flex items-center gap-2">
+            <AlertTriangle size={18} className="text-warning" />
+            Needs Attention
+          </h2>
+          <div className="space-y-3">
+            {alerts.map(alert => (
+              <div
+                key={alert.id}
+                className="bg-base border border-warning/30 rounded-[8px] p-4"
+                style={{ borderLeft: '3px solid #D97706' }}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-[14px] font-semibold text-foreground">{alert.title}</h3>
+                      <Badge variant={alert.type === 'error' ? 'error' : 'warning'}>
+                        {formatRelativeTime(alert.timestamp)}
+                      </Badge>
+                    </div>
+                    <p className="text-[13px] text-muted">{alert.description}</p>
+                  </div>
+                  <Button variant="secondary" size="sm" className="shrink-0">
+                    {alert.actionLabel} <ChevronRight size={14} />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Active Goals + Activity Today */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <Card className="lg:col-span-2 p-5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Target size={16} className="text-accent" />
+              <CardTitle>Active Goals</CardTitle>
+            </div>
+            <a href="/directives" className="text-[12px] text-accent font-medium hover:underline">
+              View all →
+            </a>
+          </CardHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {goals.map(goal => {
+              const pct = Math.round((goal.current / goal.target) * 100)
+              const statusCfg = getStatusConfig(goal.status)
+              return (
+                <div key={goal.id} className="p-3 rounded-lg border border-border bg-surface/50">
+                  <div className="flex items-start justify-between mb-2">
+                    <Badge
+                      variant={goal.category === 'Revenue' ? 'accent' : goal.category === 'Content' ? 'pink' : goal.category === 'Outreach' ? 'purple' : 'warning'}
+                    >
+                      {goal.category}
+                    </Badge>
+                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color}`}>
+                      {statusCfg.label}
+                    </span>
+                  </div>
+                  <h4 className="text-[13px] font-semibold text-foreground mb-2">{goal.title}</h4>
+                  <div className="mb-1">
+                    <div className="flex justify-between text-[11px] mb-1">
+                      <span className="text-muted">Progress</span>
+                      <span className="text-foreground font-medium">{goal.current}/{goal.target} {goal.unit}</span>
+                    </div>
+                    <div className="w-full h-2 bg-border rounded-full overflow-hidden">
+                      <div
+                        className={cn(
+                          'h-full rounded-full transition-all duration-500',
+                          goal.status === 'at_risk' ? 'bg-warning' : goal.status === 'behind' ? 'bg-error' : 'bg-success'
+                        )}
+                        style={{ width: Math.min(pct, 100) + '%' }}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted">{goal.taskCount} linked task{goal.taskCount !== 1 ? 's' : ''}</p>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Clock size={16} className="text-accent" />
+              <CardTitle>Activity Today</CardTitle>
+            </div>
+          </CardHeader>
+          <div className="h-[200px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={hourlyActivity}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-                <XAxis dataKey="date" stroke="#6e7681" fontSize={12} />
-                <YAxis stroke="#6e7681" fontSize={12} />
-                <Tooltip
-                  contentStyle={{
-                    background: '#161b22',
-                    border: '1px solid #30363d',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                  }}
-                  labelStyle={{ color: '#e6edf3' }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="requests"
-                  stroke="#4c6ef5"
-                  fill="#4c6ef5"
-                  fillOpacity={0.1}
-                  strokeWidth={2}
-                />
+              <AreaChart data={hourlyData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E5EC" vertical={false} />
+                <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#6B7280' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#6B7280' }} hide />
+                <Tooltip contentStyle={{ background: '#FFFFFF', border: '1px solid #E2E5EC', borderRadius: 8, fontSize: 12 }} />
+                <Area type="monotone" dataKey="value" stroke="#5B6EF5" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: '#5B6EF5' }} fill="#EEF0FF" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      </div>
-
-      {/* Bottom Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Goals Progress */}
-        <div className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-          <h3 className="text-sm font-medium text-[#e6edf3] mb-4">Goals Progress</h3>
-          <div className="space-y-4">
-            {goals.slice(0, 4).map(goal => (
-              <div key={goal.id}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs text-[#8b949e] truncate">{goal.title}</span>
-                  <span className="text-[10px] text-[#6e7681] flex-shrink-0 ml-2">{goal.progress}%</span>
-                </div>
-                <div className="h-1.5 bg-[#0d1117] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-dawn-500 to-dawn-400 transition-all duration-500"
-                    style={{ width: `${goal.progress}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Recent Activity */}
-        <div className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-          <h3 className="text-sm font-medium text-[#e6edf3] mb-4">Recent Activity</h3>
-          <div className="space-y-3">
-            {activityLogs.slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-start gap-3">
-                <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-                  log.severity === 'error' ? 'bg-red-500/10' :
-                  log.severity === 'warning' ? 'bg-amber-500/10' :
-                  log.severity === 'success' ? 'bg-emerald-500/10' :
-                  'bg-dawn-500/10'
-                }`}>
-                  <Activity className={`w-3 h-3 ${
-                    log.severity === 'error' ? 'text-red-400' :
-                    log.severity === 'warning' ? 'text-amber-400' :
-                    log.severity === 'success' ? 'text-emerald-400' :
-                    'text-dawn-400'
-                  }`} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-[#e6edf3] truncate">{log.summary}</p>
-                  <p className="text-[10px] text-[#6e7681] mt-0.5">
-                    {new Date(log.created_at).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Tasks Overview */}
-        <div className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-          <h3 className="text-sm font-medium text-[#e6edf3] mb-4">Tasks Overview</h3>
-          <div className="space-y-3">
-            {tasksByStatus.map(item => (
-              <div key={item.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-xs text-[#8b949e]">{item.name}</span>
-                </div>
-                <span className="text-xs font-medium text-[#e6edf3]">{item.value}</span>
-              </div>
-            ))}
-            <div className="pt-3 mt-3 border-t border-[#30363d]">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#6e7681]">Completion Rate</span>
-                <span className="text-sm font-semibold text-emerald-400">{completionRate}%</span>
-              </div>
+          <div className="flex justify-between mt-2 pt-3 border-t border-border">
+            <div className="text-center">
+              <p className="text-[18px] font-semibold text-foreground">74</p>
+              <p className="text-[10px] text-muted">Actions</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[18px] font-semibold text-foreground">12</p>
+              <p className="text-[10px] text-muted">Active</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[18px] font-semibold text-foreground">847</p>
+              <p className="text-[10px] text-muted">API Calls</p>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function StatCard({
-  title,
-  value,
-  icon: Icon,
-  color,
-  bg,
-  trend,
-}: {
-  title: string
-  value: string | number
-  icon: React.ElementType
-  color: string
-  bg: string
-  trend?: { value: number; label: string; up: boolean }
-}) {
-  return (
-    <div className="p-5 rounded-xl bg-[#161b22] border border-[#30363d] card-hover">
-      <div className="flex items-start justify-between">
-        <div className={`p-2 rounded-lg ${bg}`}>
-          <Icon className={`w-4 h-4 ${color}`} />
-        </div>
-        {trend && (
-          <div className={`flex items-center gap-0.5 text-[10px] ${trend.up ? 'text-emerald-400' : 'text-red-400'}`}>
-            {trend.up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-            {trend.value}%
-          </div>
-        )}
-      </div>
-      <div className="mt-3">
-        <p className="text-2xl font-semibold text-[#e6edf3]">{value}</p>
-        <p className="text-xs text-[#8b949e] mt-1">{title}</p>
-      </div>
-    </div>
-  )
-}
-
-function DashboardSkeleton() {
-  return (
-    <div className="space-y-6 animate-pulse">
-      <div className="h-8 w-48 skeleton" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-            <div className="h-8 w-8 skeleton rounded-lg" />
-            <div className="mt-3 h-8 w-20 skeleton" />
-            <div className="mt-1 h-4 w-24 skeleton" />
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {[...Array(2)].map((_, i) => (
-          <div key={i} className="p-5 rounded-xl bg-[#161b22] border border-[#30363d]">
-            <div className="h-5 w-32 skeleton mb-4" />
-            <div className="h-64 skeleton" />
-          </div>
-        ))}
+        </Card>
       </div>
     </div>
   )

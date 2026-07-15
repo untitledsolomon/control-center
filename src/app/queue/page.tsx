@@ -31,7 +31,7 @@ const categoryColors: Record<string, string> = {
 }
 
 export default function QueuePage() {
-  const { state, updateTaskStatus, deleteTask, addActivity, addNotification } = useAppState()
+  const { state, addTask, updateTaskStatus, deleteTask, addActivity, addNotification } = useAppState()
   const { tasks } = state
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<string | null>(null)
@@ -80,8 +80,19 @@ export default function QueuePage() {
 
   const handleAddTask = () => {
     if (!newTask.title.trim()) return
-    const { addTask } = useAppState()
-    // We'll use the store's addTask via the context
+    addTask({
+      title: newTask.title,
+      description: newTask.description,
+      priority: newTask.priority,
+      category: newTask.category,
+      status: 'queued',
+    })
+    addActivity({
+      timestamp: new Date(),
+      badge: 'TASK_COMPLETE',
+      title: 'Task created',
+      description: newTask.title,
+    })
     setShowAdd(false)
     setNewTask({ title: '', description: '', priority: 'medium', category: 'System' })
   }
