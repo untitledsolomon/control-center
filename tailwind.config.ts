@@ -1,6 +1,7 @@
 import type { Config } from "tailwindcss"
 
 const config: Config = {
+  darkMode: 'class',
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -9,22 +10,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        base: "#FFFFFF",
-        surface: "#F3F4F6",
-        "surface-raised": "#E5E7EB",
-        foreground: "#111827",
-        muted: "#6B7280",
-        border: "#E2E5EC",
-        accent: "#5B6EF5",
-        "accent-light": "#EEF0FF",
-        success: "#10B981",
-        "success-light": "#ECFDF5",
-        warning: "#D97706",
-        "warning-light": "#FFFBEB",
-        error: "#EF4444",
-        "error-light": "#FEF2F2",
-        purple: "#7C3AED",
-        pink: "#DB2777",
+        base: "var(--color-base)",
+        surface: "var(--color-surface)",
+        "surface-raised": "var(--color-surface-raised)",
+        foreground: "var(--color-foreground)",
+        muted: "var(--color-muted)",
+        border: "var(--color-border)",
+        accent: "var(--color-accent)",
+        "accent-light": "var(--color-accent-light)",
+        success: "var(--color-success)",
+        "success-light": "var(--color-success-light)",
+        warning: "var(--color-warning)",
+        "warning-light": "var(--color-warning-light)",
+        error: "var(--color-error)",
+        "error-light": "var(--color-error-light)",
+        purple: "var(--color-purple)",
+        pink: "var(--color-pink)",
       },
       maxWidth: {
         content: "1200px",
@@ -46,11 +47,16 @@ const config: Config = {
           from: { opacity: "0" },
           to: { opacity: "1" },
         },
+        "spin": {
+          from: { transform: "rotate(0deg)" },
+          to: { transform: "rotate(360deg)" },
+        },
       },
       animation: {
         "slide-in-left": "slideInLeft 250ms ease-out",
         "slide-up-toast": "slideUpToast 300ms ease-out",
         "fade-in": "fadeIn 200ms ease-out",
+        "spin": "spin 1s linear infinite",
       },
     },
   },

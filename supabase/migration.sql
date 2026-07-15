@@ -165,3 +165,40 @@ CREATE POLICY "Allow anon full access" ON jarvis_playbooks FOR ALL USING (true) 
 CREATE POLICY "Allow anon full access" ON jarvis_review_items FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon full access" ON jarvis_outputs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon full access" ON jarvis_resources FOR ALL USING (true) WITH CHECK (true);
+
+-- 11. Settings
+CREATE TABLE IF NOT EXISTS jarvis_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key TEXT NOT NULL UNIQUE,
+  value TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'general',
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Default settings
+INSERT INTO jarvis_settings (key, value, category, description) VALUES
+  ('accent_color', '#5B6EF5', 'appearance', 'Primary accent color for the UI'),
+  ('notif_task_complete', 'true', 'notifications', 'Notify when tasks complete'),
+  ('notif_task_failed', 'true', 'notifications', 'Notify when tasks fail'),
+  ('notif_new_lead', 'true', 'notifications', 'Notify on new leads'),
+  ('notif_content_published', 'true', 'notifications', 'Notify on content publish'),
+  ('notif_system_alert', 'true', 'notifications', 'Notify on system alerts'),
+  ('notif_schedule_run', 'false', 'notifications', 'Notify on schedule runs'),
+  ('require_api_key', 'true', 'security', 'Require API key for all requests'),
+  ('audit_logging', 'true', 'security', 'Log all system actions'),
+  ('session_timeout', '60', 'security', 'Session timeout in minutes'),
+  ('auto_refresh', 'true', 'system', 'Auto-refresh dashboard'),
+  ('items_per_page', '20', 'system', 'Items per page in lists')
+ON CONFLICT (key) DO NOTHING;
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_settings_key ON jarvis_settings(key);
+CREATE INDEX IF NOT EXISTS idx_settings_category ON jarvis_settings(category);
+
+-- Enable RLS
+ALTER TABLE jarvis_settings ENABLE ROW LEVEL SECURITY;
+
+-- Allow anon full access
+CREATE POLICY "Allow anon full access" ON jarvis_settings FOR ALL USING (true) WITH CHECK (true);

@@ -24,8 +24,28 @@
     --color-pink: #DB2777;
   }
 
+  .dark {
+    --color-base: #0F1117;
+    --color-surface: #1A1D27;
+    --color-surface-raised: #252836;
+    --color-foreground: #EDEDEE;
+    --color-muted: #8B8D97;
+    --color-border: #2A2D3A;
+    --color-accent: #7B8AF7;
+    --color-accent-light: #1E2140;
+    --color-success: #34D399;
+    --color-success-light: #0A2E1A;
+    --color-warning: #FBBF24;
+    --color-warning-light: #2E200A;
+    --color-error: #F87171;
+    --color-error-light: #2E0A0A;
+    --color-purple: #A78BFA;
+    --color-pink: #F472B6;
+  }
+
   body {
     @apply bg-base text-foreground font-sans antialiased;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   * {
@@ -70,4 +90,9 @@
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

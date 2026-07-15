@@ -1,131 +1,225 @@
 'use client'
 
-import React, { useState } from 'react'
-import { useApp } from '@/store/AppContext'
-import { Clock, Plus, Play, Pause, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { useAppState } from '@/lib/store'
+import { Card, CardHeader, CardTitle, Badge, Button } from '@/components/ui'
+import { formatRelativeTime, cn } from '@/lib/utils'
+import {
+  Clock, Plus, Play, Pause, Trash2, RefreshCw,
+  History, Bell, BellOff, Search
+} from 'lucide-react'
 
 export default function SchedulesPage() {
-  const { state, addSchedule, editSchedule } = useApp()
-  const { schedules } = state
-  const [showForm, setShowForm] = useState(false)
-  const [name, setName] = useState('')
-  const [cron, setCron] = useState('')
+  const { state, addSchedule, deleteSchedule, toggleSchedule, runSchedule, updateSchedule, addActivity, addNotification } = useAppState()
+  const { cronJobs } = state
+  const [search, setSearch] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
+  const [newSchedule, setNewSchedule] = useState({
+    name: '',
+    description: '',
+    cronExpression: '0 9 * * 1-5',
+    humanReadable: 'Every weekday at 9:00 AM',
+    notifyOnComplete: false,
+  })
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    await addSchedule({ name, cron_expression: cron || '0 0 * * *' })
-    setName('')
-    setCron('')
-    setShowForm(false)
+  const filtered = cronJobs.filter(s =>
+    !search || s.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const handleAdd = () => {
+    if (!newSchedule.name.trim() || !newSchedule.cronExpression.trim()) return
+    addSchedule({
+      name: newSchedule.name,
+      description: newSchedule.description,
+      cronExpression: newSchedule.cronExpression,
+      humanReadable: newSchedule.humanReadable,
+      notifyOnComplete: newSchedule.notifyOnComplete,
+      status: 'running',
+      lastRun: null,
+      lastResult: null,
+      lastDuration: null,
+      nextRun: new Date(Date.now() + 86400000),
+      history: [],
+    })
+    addActivity({
+      timestamp: new Date(),
+      badge: 'TASK_COMPLETE',
+      title: 'Schedule created',
+      description: newSchedule.name,
+    })
+    setShowAdd(false)
+    setNewSchedule({ name: '', description: '', cronExpression: '0 9 * * 1-5', humanReadable: 'Every weekday at 9:00 AM', notifyOnComplete: false })
   }
 
   const cronPresets = [
-    { label: 'Every hour', value: '0 * * * *' },
-    { label: 'Every 4 hours', value: '0 */4 * * *' },
-    { label: 'Daily at midnight', value: '0 0 * * *' },
-    { label: 'Weekly on Monday', value: '0 0 * * 1' },
-    { label: 'Monthly on 1st', value: '0 0 1 * *' },
+    { label: 'Every hour', cron: '0 * * * *', human: 'Every hour' },
+    { label: 'Daily at 9 AM', cron: '0 9 * * *', human: 'Daily at 9:00 AM' },
+    { label: 'Weekdays at 9 AM', cron: '0 9 * * 1-5', human: 'Every weekday at 9:00 AM' },
+    { label: 'Weekly Monday', cron: '0 9 * * 1', human: 'Every Monday at 9:00 AM' },
+    { label: 'Monthly 1st', cron: '0 9 1 * *', human: '1st of every month at 9:00 AM' },
   ]
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-content mx-auto px-4 md:px-8 py-6 md:py-8">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-[#e6edf3]">Schedules</h1>
-          <p className="text-sm text-[#8b949e] mt-1">{schedules.length} cron jobs</p>
+          <h1 className="text-[24px] font-semibold text-foreground">Schedules</h1>
+          <p className="text-[13px] text-muted mt-1">{cronJobs.length} schedules · {cronJobs.filter(s => s.status === 'running').length} active</p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-dawn-600 rounded-lg hover:bg-dawn-500 transition-colors"
-        >
-          <Plus className="w-3 h-3" />
-          New Schedule
-        </button>
+        <Button onClick={() => setShowAdd(!showAdd)}>
+          <Plus size={16} /> New Schedule
+        </Button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="p-4 rounded-xl bg-[#161b22] border border-[#30363d] space-y-3">
-          <input
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Schedule name..."
-            className="w-full px-3 py-2 text-sm bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] placeholder-[#6e7681] outline-none focus:border-dawn-500"
-          />
-          <div className="flex gap-2 flex-wrap">
-            {cronPresets.map(p => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setCron(p.value)}
-                className={`px-2 py-1 text-[10px] rounded-full border transition-colors ${
-                  cron === p.value
-                    ? 'bg-dawn-500/20 text-dawn-400 border-dawn-500/30'
-                    : 'bg-[#0d1117] text-[#6e7681] border-[#30363d] hover:border-dawn-500/30'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <input
-            type="text"
-            value={cron}
-            onChange={e => setCron(e.target.value)}
-            placeholder="Cron expression (e.g., 0 */4 * * *)"
-            className="w-full px-3 py-2 text-sm font-mono bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] placeholder-[#6e7681] outline-none focus:border-dawn-500"
-          />
-          <div className="flex gap-2">
-            <button type="submit" className="px-3 py-1.5 text-xs text-white bg-dawn-600 rounded-lg hover:bg-dawn-500 transition-colors">
-              Create
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} className="px-3 py-1.5 text-xs text-[#8b949e] hover:text-[#e6edf3] transition-colors">
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
-
-      <div className="space-y-2">
-        {schedules.map(s => (
-          <div key={s.id} className="flex items-center gap-4 p-4 rounded-xl bg-[#161b22] border border-[#30363d] hover:border-dawn-500/30 transition-all">
-            <div className={`p-2 rounded-lg ${s.enabled ? 'bg-emerald-500/10' : 'bg-[#0d1117]'}`}>
-              <Clock className={`w-4 h-4 ${s.enabled ? 'text-emerald-400' : 'text-[#6e7681]'}`} />
+      {/* Quick Add */}
+      {showAdd && (
+        <Card className="mb-6 p-4 border-accent/30">
+          <div className="space-y-3">
+            <input
+              type="text"
+              placeholder="Schedule name..."
+              value={newSchedule.name}
+              onChange={e => setNewSchedule({ ...newSchedule, name: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+              autoFocus
+            />
+            <input
+              type="text"
+              placeholder="Description (optional)"
+              value={newSchedule.description}
+              onChange={e => setNewSchedule({ ...newSchedule, description: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <div>
+              <label className="text-[11px] text-muted font-medium mb-1 block">Cron Expression</label>
+              <input
+                type="text"
+                placeholder="0 9 * * 1-5"
+                value={newSchedule.cronExpression}
+                onChange={e => setNewSchedule({ ...newSchedule, cronExpression: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent font-mono"
+              />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium text-[#e6edf3]">{s.name}</h3>
-                <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full border ${
-                  s.enabled
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                    : 'bg-[#0d1117] text-[#6e7681] border-[#30363d]'
-                }`}>
-                  {s.enabled ? 'Running' : 'Paused'}
-                </span>
-              </div>
-              <p className="text-xs font-mono text-[#6e7681] mt-0.5">{s.cron_expression}</p>
-              {s.last_run && <p className="text-[10px] text-[#6e7681] mt-0.5">Last run: {new Date(s.last_run).toLocaleString()}</p>}
+            <div className="flex flex-wrap gap-1.5">
+              {cronPresets.map(preset => (
+                <button
+                  key={preset.cron}
+                  onClick={() => setNewSchedule({ ...newSchedule, cronExpression: preset.cron, humanReadable: preset.human })}
+                  className={cn(
+                    'px-2 py-1 rounded text-[11px] font-medium border transition-colors',
+                    newSchedule.cronExpression === preset.cron
+                      ? 'border-accent bg-accent-light text-accent'
+                      : 'border-border bg-surface text-muted hover:text-foreground'
+                  )}
+                >
+                  {preset.label}
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => editSchedule(s.id, { enabled: !s.enabled })}
-                className="p-1.5 rounded-lg text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#0d1117] transition-colors"
-                title={s.enabled ? 'Pause' : 'Resume'}
-              >
-                {s.enabled ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              </button>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newSchedule.notifyOnComplete}
+                  onChange={e => setNewSchedule({ ...newSchedule, notifyOnComplete: e.target.checked })}
+                  className="rounded border-border"
+                />
+                <span className="text-[12px] text-muted">Notify on completion</span>
+              </label>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="secondary" onClick={() => setShowAdd(false)}>Cancel</Button>
+              <Button onClick={handleAdd}>Create Schedule</Button>
             </div>
           </div>
-        ))}
-        {schedules.length === 0 && !showForm && (
-          <div className="p-8 rounded-xl bg-[#161b22] border border-[#30363d] flex items-center justify-center">
-            <div className="text-center">
-              <Clock className="w-8 h-8 text-[#30363d] mx-auto mb-2" />
-              <p className="text-sm text-[#8b949e]">No schedules yet</p>
-              <p className="text-xs text-[#6e7681] mt-1">Create your first cron job</p>
-            </div>
-          </div>
+        </Card>
+      )}
+
+      {/* Search */}
+      <div className="relative max-w-xs mb-4">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+        <input
+          type="text"
+          placeholder="Search schedules..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+        />
+      </div>
+
+      {/* Schedule List */}
+      <div className="space-y-3">
+        {filtered.length === 0 ? (
+          <Card className="p-8 text-center">
+            <Clock size={40} className="mx-auto text-muted mb-3" />
+            <p className="text-[14px] text-muted">No schedules yet. Create one to automate recurring tasks.</p>
+          </Card>
+        ) : (
+          filtered.map(schedule => (
+            <Card key={schedule.id} className="p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-[14px] font-semibold text-foreground">{schedule.name}</h3>
+                    <Badge variant={schedule.status === 'running' ? 'success' : schedule.status === 'paused' ? 'warning' : 'error'}>
+                      {schedule.status}
+                    </Badge>
+                  </div>
+                  {schedule.description && (
+                    <p className="text-[12px] text-muted mb-2">{schedule.description}</p>
+                  )}
+                  <div className="flex items-center gap-4 text-[11px] text-muted">
+                    <span className="font-mono">{schedule.cronExpression}</span>
+                    <span>—</span>
+                    <span>{schedule.humanReadable}</span>
+                  </div>
+                  <div className="flex items-center gap-4 mt-2 text-[11px] text-muted">
+                    {schedule.lastRun && (
+                      <span>Last: {formatRelativeTime(schedule.lastRun)}</span>
+                    )}
+                    <span>Next: {formatRelativeTime(schedule.nextRun)}</span>
+                    {schedule.lastResult && (
+                      <Badge variant={schedule.lastResult === 'success' ? 'success' : 'error'}>
+                        {schedule.lastResult}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => runSchedule(schedule.id)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent-light text-muted hover:text-accent transition-colors"
+                    title="Run now"
+                  >
+                    <Play size={14} />
+                  </button>
+                  <button
+                    onClick={() => toggleSchedule(schedule.id)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
+                    title={schedule.status === 'paused' ? 'Resume' : 'Pause'}
+                  >
+                    {schedule.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      deleteSchedule(schedule.id)
+                      addActivity({
+                        timestamp: new Date(),
+                        badge: 'TASK_COMPLETE',
+                        title: 'Schedule deleted',
+                        description: schedule.name,
+                      })
+                    }}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-error-light text-muted hover:text-error transition-colors"
+                    title="Delete schedule"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            </Card>
+          ))
         )}
       </div>
     </div>
