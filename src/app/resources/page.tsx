@@ -104,13 +104,14 @@ function commentToRow(c: LineComment) {
     resolved: c.resolved,
     resolved_by: c.resolvedBy ?? null,
     resolved_at: c.resolvedAt ? c.resolvedAt.toISOString() : null,
-    replies: JSON.stringify(c.replies.map(r => ({
+    // Pass array directly — Supabase JSONB handles serialization
+    replies: c.replies.map(r => ({
       id: r.id,
       author: r.author,
       author_role: r.authorRole,
       body: r.body,
       created_at: r.createdAt.toISOString(),
-    }))),
+    })),
   }
 }
 
@@ -144,13 +145,16 @@ async function updateCommentInDB(id: string, updates: Partial<LineComment>): Pro
   if (updates.resolved !== undefined) dbUpdates.resolved = updates.resolved
   if (updates.resolvedBy !== undefined) dbUpdates.resolved_by = updates.resolvedBy
   if (updates.resolvedAt !== undefined) dbUpdates.resolved_at = updates.resolvedAt.toISOString()
-  if (updates.replies !== undefined) dbUpdates.replies = JSON.stringify(updates.replies.map(r => ({
-    id: r.id,
-    author: r.author,
-    author_role: r.authorRole,
-    body: r.body,
-    created_at: r.createdAt.toISOString(),
-  })))
+  if (updates.replies !== undefined) {
+    // Pass array directly — Supabase JSONB handles serialization
+    dbUpdates.replies = updates.replies.map(r => ({
+      id: r.id,
+      author: r.author,
+      author_role: r.authorRole,
+      body: r.body,
+      created_at: r.createdAt.toISOString(),
+    }))
+  }
   const { data, error } = await supabase
     .from(COMMENTS_TABLE)
     .update(dbUpdates)
@@ -189,10 +193,11 @@ async function seedCommentsIfEmpty(): Promise<void> {
       author: 'Solomon', author_role: 'solomon',
       body: "We should add a question about their current tech stack here.",
       resolved: true, resolved_by: 'DAWN', resolved_at: new Date(now - 2 * 86400000).toISOString(),
-      replies: JSON.stringify([
+      // Pass array directly — Supabase JSONB handles it
+      replies: [
         { id: 'c1r1', author: 'DAWN', author_role: 'dawn', body: "Good idea. I'll add \"What CRM/ERP are you currently using?\" as a follow-up.", created_at: new Date(now - 2.5 * 86400000).toISOString() },
         { id: 'c1r2', author: 'Solomon', author_role: 'solomon', body: "Perfect, that's exactly what I was thinking.", created_at: new Date(now - 2 * 86400000).toISOString() },
-      ]),
+      ],
       created_at: new Date(now - 3 * 86400000).toISOString(),
       updated_at: new Date(now - 3 * 86400000).toISOString(),
     },
@@ -201,7 +206,7 @@ async function seedCommentsIfEmpty(): Promise<void> {
       author: 'DAWN', author_role: 'dawn',
       body: 'Should we add a section about pricing discussion here? Some clients ask early.',
       resolved: false,
-      replies: '[]',
+      replies: [],
       created_at: new Date(now - 1 * 86400000).toISOString(),
       updated_at: new Date(now - 1 * 86400000).toISOString(),
     },
@@ -210,9 +215,9 @@ async function seedCommentsIfEmpty(): Promise<void> {
       author: 'Solomon', author_role: 'solomon',
       body: 'The training session should be 3 hours, not 2. We always run over.',
       resolved: true, resolved_by: 'DAWN', resolved_at: new Date(now - 10 * 86400000).toISOString(),
-      replies: JSON.stringify([
+      replies: [
         { id: 'c3r1', author: 'DAWN', author_role: 'dawn', body: 'Updated to 3 hours in v3. Also added a 30-min buffer for Q&A.', created_at: new Date(now - 10 * 86400000).toISOString() },
-      ]),
+      ],
       created_at: new Date(now - 12 * 86400000).toISOString(),
       updated_at: new Date(now - 12 * 86400000).toISOString(),
     },
@@ -221,7 +226,7 @@ async function seedCommentsIfEmpty(): Promise<void> {
       author: 'Solomon', author_role: 'solomon',
       body: 'This implementation plan looks solid. Let me review the architecture section in detail.',
       resolved: false,
-      replies: '[]',
+      replies: [],
       created_at: new Date(now - 3600000).toISOString(),
       updated_at: new Date(now - 3600000).toISOString(),
     },
@@ -467,6 +472,67 @@ function renderMarkdownLine(line: string, index: number): { html: string; key: n
   return { html: `<p class="text-[13px] text-foreground leading-relaxed">${html}</p>`, key: index }
 }
 
+// ─── Markdown Preview Component ─────────────────────────────────────────────
+
+function MarkdownPreview({ content }: { content: string }) {
+  const lines = content.split('\n')
+  const renderedLines: { html: string; key: number; isCodeBlock?: boolean }[] = []
+  let inCodeBlock = false
+  let codeContent = ''
+  let codeLang = ''
+  let codeStartIndex = 0
+
+  lines.forEach((line, index) => {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        renderedLines.push({
+          html: `<pre class="bg-surface-raised rounded-lg p-4 overflow-x-auto my-3"><code class="text-[12px] font-mono leading-relaxed text-foreground">${codeContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
+          key: codeStartIndex,
+        })
+        codeContent = ''
+        inCodeBlock = false
+      } else {
+        codeLang = line.slice(3).trim()
+        codeStartIndex = index
+        inCodeBlock = true
+      }
+      return
+    }
+    if (inCodeBlock) { codeContent += (codeContent ? '\n' : '') + line; return }
+    if (line.startsWith('|') && lines[index + 1]?.startsWith('|')) {
+      if (lines[index + 1]?.includes('---')) {
+        const headers = line.split('|').filter(c => c.trim()).map(c => c.trim())
+        renderedLines.push({
+          html: `<table class="w-full border-collapse my-3"><thead><tr>${headers.map(h => `<th class="px-3 py-2 text-[12px] font-semibold text-foreground text-left border-b-2 border-border bg-surface/50">${h}</th>`).join('')}</tr></thead><tbody>`,
+          key: index,
+        })
+        return
+      }
+      const cells = line.split('|').filter(c => c.trim()).map(c => c.trim())
+      renderedLines.push({ html: `<tr>${cells.map(c => `<td class="px-3 py-1.5 text-[12px] text-foreground border-b border-border">${c}</td>`).join('')}</tr>`, key: index })
+      return
+    }
+    if (renderedLines.length > 0 && renderedLines[renderedLines.length - 1].html.startsWith('<tr>') && !line.startsWith('|')) {
+      renderedLines.push({ html: '</tbody></table>', key: index })
+    }
+    const result = renderMarkdownLine(line, index)
+    renderedLines.push(result)
+  })
+
+  if (inCodeBlock) {
+    renderedLines.push({
+      html: `<pre class="bg-surface-raised rounded-lg p-4 overflow-x-auto my-3"><code class="text-[12px] font-mono leading-relaxed text-foreground">${codeContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
+      key: codeStartIndex,
+    })
+  }
+
+  return (
+    <div className="prose prose-sm max-w-none">
+      {renderedLines.map(({ html, key }) => <div key={key} dangerouslySetInnerHTML={{ __html: html }} />)}
+    </div>
+  )
+}
+
 // ─── Line Comment Thread Component ──────────────────────────────────────────
 
 function LineCommentThread({
@@ -686,67 +752,6 @@ function FileEditor({
   )
 }
 
-// ─── Markdown Preview Component ─────────────────────────────────────────────
-
-function MarkdownPreview({ content }: { content: string }) {
-  const lines = content.split('\n')
-  const renderedLines: { html: string; key: number; isCodeBlock?: boolean }[] = []
-  let inCodeBlock = false
-  let codeContent = ''
-  let codeLang = ''
-  let codeStartIndex = 0
-
-  lines.forEach((line, index) => {
-    if (line.startsWith('```')) {
-      if (inCodeBlock) {
-        renderedLines.push({
-          html: `<pre class="bg-surface-raised rounded-lg p-4 overflow-x-auto my-3"><code class="text-[12px] font-mono leading-relaxed text-foreground">${codeContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
-          key: codeStartIndex,
-        })
-        codeContent = ''
-        inCodeBlock = false
-      } else {
-        codeLang = line.slice(3).trim()
-        codeStartIndex = index
-        inCodeBlock = true
-      }
-      return
-    }
-    if (inCodeBlock) { codeContent += (codeContent ? '\n' : '') + line; return }
-    if (line.startsWith('|') && lines[index + 1]?.startsWith('|')) {
-      if (lines[index + 1]?.includes('---')) {
-        const headers = line.split('|').filter(c => c.trim()).map(c => c.trim())
-        renderedLines.push({
-          html: `<table class="w-full border-collapse my-3"><thead><tr>${headers.map(h => `<th class="px-3 py-2 text-[12px] font-semibold text-foreground text-left border-b-2 border-border bg-surface/50">${h}</th>`).join('')}</tr></thead><tbody>`,
-          key: index,
-        })
-        return
-      }
-      const cells = line.split('|').filter(c => c.trim()).map(c => c.trim())
-      renderedLines.push({ html: `<tr>${cells.map(c => `<td class="px-3 py-1.5 text-[12px] text-foreground border-b border-border">${c}</td>`).join('')}</tr>`, key: index })
-      return
-    }
-    if (renderedLines.length > 0 && renderedLines[renderedLines.length - 1].html.startsWith('<tr>') && !line.startsWith('|')) {
-      renderedLines.push({ html: '</tbody></table>', key: index })
-    }
-    const result = renderMarkdownLine(line, index)
-    renderedLines.push(result)
-  })
-
-  if (inCodeBlock) {
-    renderedLines.push({
-      html: `<pre class="bg-surface-raised rounded-lg p-4 overflow-x-auto my-3"><code class="text-[12px] font-mono leading-relaxed text-foreground">${codeContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
-      key: codeStartIndex,
-    })
-  }
-
-  return (
-    <div className="prose prose-sm max-w-none">
-      {renderedLines.map(({ html, key }) => <div key={key} dangerouslySetInnerHTML={{ __html: html }} />)}
-    </div>
-  )
-}
-
 // ─── File Viewer Modal ──────────────────────────────────────────────────────
 
 function FileViewerModal({
@@ -813,6 +818,9 @@ function FileViewerModal({
   const commentInputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { if (newCommentLine && commentInputRef.current) commentInputRef.current.focus() }, [newCommentLine])
+
+  // Reset viewMode to 'read' when file changes
+  useEffect(() => { setViewMode('read') }, [file.id])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
@@ -902,7 +910,8 @@ function FileViewerModal({
                   </div>
                 ) : (
                   <div className="relative">
-                    {isMd && (
+                    {/* Read/Code toggle — show for all editable text files */}
+                    {editable && (
                       <div className="flex items-center gap-1 mb-3 border-b border-border pb-2">
                         <button onClick={() => setViewMode('read')} className={cn('px-2.5 py-1 text-[11px] font-medium rounded transition-colors flex items-center gap-1.5', viewMode === 'read' ? 'bg-accent-light text-accent' : 'text-muted hover:text-foreground')}>
                           <Eye size={12} /> Read
@@ -924,7 +933,11 @@ function FileViewerModal({
                         ))}
                       </div>
                       <div className="flex-1 min-w-0">
-                        {isMd && viewMode === 'read' ? <MarkdownPreview content={fileContent} /> : <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">{fileContent}</pre>}
+                        {viewMode === 'read' && isMd ? (
+                          <MarkdownPreview content={fileContent} />
+                        ) : (
+                          <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">{fileContent}</pre>
+                        )}
                       </div>
                     </div>
                     {newCommentLine && (
