@@ -933,8 +933,12 @@ function FileViewerModal({
                         ))}
                       </div>
                       <div className="flex-1 min-w-0">
-                        {viewMode === 'read' && isMd ? (
-                          <MarkdownPreview content={fileContent} />
+                        {viewMode === 'read' ? (
+                          isMd ? (
+                            <MarkdownPreview content={fileContent} />
+                          ) : (
+                            <div className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{fileContent}</div>
+                          )
                         ) : (
                           <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">{fileContent}</pre>
                         )}
