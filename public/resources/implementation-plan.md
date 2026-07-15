@@ -566,7 +566,7 @@ This is the **audit trail** that makes AI operations trustworthy.
 
 ```
 Page Component → useAppState() → dispatch() → reducer → re-render
-                    ↕
+                    ⇕
                 Supabase calls (sequential, blocking)
 ```
 
@@ -574,9 +574,9 @@ Page Component → useAppState() → dispatch() → reducer → re-render
 
 ```
 Page Component → useQuery/useMutation (React Query) → Optimistic Cache
-                    ↕                              ↕
+                    ⇕                              ⇕
                 Supabase/DAWN API              UI updates instantly
-                    ↕
+                    ⇕
                 Real-time subscriptions (background sync)
 ```
 

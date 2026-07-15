@@ -1,539 +1,260 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
-import { Card } from '@/components/ui'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useAppState } from '@/lib/store'
+import { Card, CardHeader, CardTitle, Badge, Button } from '@/components/ui'
 import { formatRelativeTime, cn } from '@/lib/utils'
 import {
-  FolderOpen, Search, FileText, FileSpreadsheet,
-  Image, Code, X, Eye, ChevronRight, Target, BookOpen,
-  Archive, Link as LinkIcon, AlertCircle, Download,
-  ExternalLink, Clock, Tag, Type, List, CheckSquare,
-  Terminal, Table as TableIcon, Quote, Hash, Bold,
-  Italic, Code2, ListOrdered, Minus, ChevronDown
+  FolderOpen, Search, FileText, Download, ExternalLink,
+  Trash2, Filter, Clock, User, BookOpen, FileSpreadsheet,
+  Image, Code, X, Eye, ChevronRight, Target, ListChecks,
+  MessageSquare, Cpu, Globe, Upload, Edit3, Save, Plus,
+  MessageCircle, Reply, MoreHorizontal, Check, AlertCircle,
+  History, Hash, Calendar, FileEdit, FileCode, FileImage,
+  FileArchive, Link, AtSign, CornerDownRight, Pin, Clock3,
+  ArrowLeft, Bold, Italic, List, Heading1, Heading2, Heading3,
+  Quote, Code2, Link2, ImageIcon, Table2, Minus, Undo2, Redo2,
+  Maximize2, Minimize2, FilePlus, FileUp, FileDown, GripVertical,
+  PanelRightOpen, PanelRightClose, SplitSquareHorizontal,
+  MessageSquarePlus, CheckCheck, Loader2, AlertTriangle
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-interface Resource {
+interface ResourceFile {
   id: string
   title: string
   type: string
+  extension: string
   size: string
+  sizeBytes: number
+  createdAt: Date
   updatedAt: Date
+  uploadedBy: string
+  lastEditedBy: string
+  version: number
   tags: string[]
   description: string
-  content?: string
-  url?: string
-}
-
-// ─── Markdown Renderer ───────────────────────────────────────────────
-
-interface MarkdownToken {
-  type: 'h1' | 'h2' | 'h3' | 'h4' | 'p' | 'li' | 'ol' | 'code' | 'codeblock'
-    | 'hr' | 'blockquote' | 'table' | 'empty' | 'html'
   content: string
-  lang?: string
-  rows?: string[][]
+  path: string
+  isPublic: boolean
+  editHistory: EditHistoryEntry[]
 }
 
-function tokenizeMarkdown(text: string): MarkdownToken[] {
-  const lines = text.split('\n')
-  const tokens: MarkdownToken[] = []
-  let i = 0
-
-  while (i < lines.length) {
-    const line = lines[i]
-
-    // Code block (```)
-    if (line.trimStart().startsWith('```')) {
-      const lang = line.trimStart().slice(3).trim()
-      const codeLines: string[] = []
-      i++
-      while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
-        codeLines.push(lines[i])
-        i++
-      }
-      tokens.push({ type: 'codeblock', content: codeLines.join('\n'), lang: lang || undefined })
-      i++ // skip closing ```
-      continue
-    }
-
-    // HTML comment or tag
-    if (line.trimStart().startsWith('<!--') || line.trimStart().startsWith('<')) {
-      tokens.push({ type: 'html', content: line })
-      i++
-      continue
-    }
-
-    // Headings
-    const hMatch = line.match(/^(#{1,4})\s+(.+)$/)
-    if (hMatch) {
-      const level = hMatch[1].length as 1 | 2 | 3 | 4
-      const typeMap = { 1: 'h1' as const, 2: 'h2' as const, 3: 'h3' as const, 4: 'h4' as const }
-      tokens.push({ type: typeMap[level], content: hMatch[2] })
-      i++
-      continue
-    }
-
-    // Horizontal rule
-    if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) {
-      tokens.push({ type: 'hr', content: '' })
-      i++
-      continue
-    }
-
-    // Blockquote
-    if (line.trimStart().startsWith('> ')) {
-      const quoteLines: string[] = []
-      while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
-        quoteLines.push(lines[i].trimStart().slice(2))
-        i++
-      }
-      tokens.push({ type: 'blockquote', content: quoteLines.join('\n') })
-      continue
-    }
-
-    // Table
-    if (line.includes('|') && line.trimStart().startsWith('|')) {
-      const tableRows: string[][] = []
-      while (i < lines.length && lines[i].includes('|')) {
-        const cells = lines[i].split('|').filter(c => c.trim()).map(c => c.trim())
-        // Skip separator rows (| --- | --- |)
-        if (!cells.every(c => /^[-:]+$/.test(c.replace(/\s/g, '')))) {
-          tableRows.push(cells)
-        }
-        i++
-      }
-      if (tableRows.length > 0) {
-        tokens.push({ type: 'table', content: '', rows: tableRows })
-      }
-      continue
-    }
-
-    // Ordered list
-    if (/^\d+\.\s/.test(line.trimStart())) {
-      const listLines: string[] = []
-      while (i < lines.length && /^\d+\.\s/.test(lines[i].trimStart())) {
-        listLines.push(lines[i].trimStart().replace(/^\d+\.\s/, ''))
-        i++
-      }
-      tokens.push({ type: 'ol', content: listLines.join('\n') })
-      continue
-    }
-
-    // Unordered list
-    if (/^[-*+]\s/.test(line.trimStart())) {
-      const listLines: string[] = []
-      while (i < lines.length && /^[-*+]\s/.test(lines[i].trimStart())) {
-        listLines.push(lines[i].trimStart().replace(/^[-*+]\s/, ''))
-        i++
-      }
-      tokens.push({ type: 'li', content: listLines.join('\n') })
-      continue
-    }
-
-    // Empty line
-    if (line.trim() === '') {
-      tokens.push({ type: 'empty', content: '' })
-      i++
-      continue
-    }
-
-    // Paragraph
-    tokens.push({ type: 'p', content: line })
-    i++
-  }
-
-  return tokens
+interface EditHistoryEntry {
+  version: number
+  editedBy: string
+  editedAt: Date
+  summary: string
 }
 
-function renderInlineMarkdown(text: string): React.ReactNode[] {
-  // Process inline formatting: **bold**, *italic*, `code`, [link](url)
-  const parts: React.ReactNode[] = []
-  let remaining = text
-  let key = 0
-
-  while (remaining.length > 0) {
-    // Bold: **text**
-    const boldMatch = remaining.match(/^\*\*(.+?)\*\*/)
-    if (boldMatch) {
-      parts.push(<strong key={key++} className="font-semibold">{boldMatch[1]}</strong>)
-      remaining = remaining.slice(boldMatch[0].length)
-      continue
-    }
-
-    // Italic: *text*
-    const italicMatch = remaining.match(/^\*(.+?)\*/)
-    if (italicMatch) {
-      parts.push(<em key={key++} className="italic">{italicMatch[1]}</em>)
-      remaining = remaining.slice(italicMatch[0].length)
-      continue
-    }
-
-    // Inline code: `code`
-    const codeMatch = remaining.match(/^`(.+?)`/)
-    if (codeMatch) {
-      parts.push(
-        <code key={key++} className="px-1.5 py-0.5 rounded bg-surface-raised text-[12px] font-mono text-accent">
-          {codeMatch[1]}
-        </code>
-      )
-      remaining = remaining.slice(codeMatch[0].length)
-      continue
-    }
-
-    // Link: [text](url)
-    const linkMatch = remaining.match(/^\[(.+?)\]\((.+?)\)/)
-    if (linkMatch) {
-      parts.push(
-        <a key={key++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
-           className="text-accent hover:underline">
-          {linkMatch[1]}
-          <ExternalLink size={10} className="inline ml-0.5" />
-        </a>
-      )
-      remaining = remaining.slice(linkMatch[0].length)
-      continue
-    }
-
-    // Regular text up to next special char
-    const nextSpecial = remaining.search(/[*`\[]/)
-    if (nextSpecial === 0) {
-      // Shouldn't happen, but safety
-      parts.push(remaining[0])
-      remaining = remaining.slice(1)
-    } else if (nextSpecial > 0) {
-      parts.push(remaining.slice(0, nextSpecial))
-      remaining = remaining.slice(nextSpecial)
-    } else {
-      parts.push(remaining)
-      remaining = ''
-    }
-  }
-
-  return parts
+interface LineComment {
+  id: string
+  fileId: string
+  lineNumber: number
+  author: string
+  authorRole: 'solomon' | 'dawn' | 'agent' | 'team'
+  body: string
+  createdAt: Date
+  updatedAt: Date
+  resolved: boolean
+  resolvedBy?: string
+  resolvedAt?: Date
+  replies: LineCommentReply[]
 }
 
-function MarkdownRenderer({ content }: { content: string }) {
-  const tokens = useMemo(() => tokenizeMarkdown(content), [content])
-
-  return (
-    <div className="space-y-3">
-      {tokens.map((token, i) => {
-        switch (token.type) {
-          case 'h1':
-            return (
-              <h1 key={i} className="text-[22px] font-bold text-foreground mt-8 mb-3 pb-2 border-b border-border">
-                {renderInlineMarkdown(token.content)}
-              </h1>
-            )
-          case 'h2':
-            return (
-              <h2 key={i} className="text-[17px] font-semibold text-foreground mt-6 mb-2">
-                {renderInlineMarkdown(token.content)}
-              </h2>
-            )
-          case 'h3':
-            return (
-              <h3 key={i} className="text-[14px] font-semibold text-foreground mt-5 mb-1.5">
-                {renderInlineMarkdown(token.content)}
-              </h3>
-            )
-          case 'h4':
-            return (
-              <h4 key={i} className="text-[13px] font-semibold text-foreground mt-4 mb-1">
-                {renderInlineMarkdown(token.content)}
-              </h4>
-            )
-          case 'p':
-            return (
-              <p key={i} className="text-[13px] text-foreground leading-[1.7]">
-                {renderInlineMarkdown(token.content)}
-              </p>
-            )
-          case 'li': {
-            const items = token.content.split('\n')
-            return (
-              <ul key={i} className="space-y-1 ml-4">
-                {items.map((item, j) => (
-                  <li key={j} className="text-[13px] text-foreground leading-relaxed flex items-start gap-2">
-                    <span className="text-muted mt-1.5 shrink-0 w-1.5 h-1.5 rounded-full bg-muted" />
-                    <span>{renderInlineMarkdown(item)}</span>
-                  </li>
-                ))}
-              </ul>
-            )
-          }
-          case 'ol': {
-            const items = token.content.split('\n')
-            return (
-              <ol key={i} className="space-y-1 ml-4 list-decimal">
-                {items.map((item, j) => (
-                  <li key={j} className="text-[13px] text-foreground leading-relaxed pl-1">
-                    {renderInlineMarkdown(item)}
-                  </li>
-                ))}
-              </ol>
-            )
-          }
-          case 'codeblock':
-            return (
-              <div key={i} className="relative group">
-                {token.lang && (
-                  <div className="absolute top-0 right-0 px-3 py-1 text-[10px] font-mono text-muted bg-surface-raised rounded-bl-lg rounded-tr-lg border-l border-b border-border">
-                    {token.lang}
-                  </div>
-                )}
-                <pre className="bg-surface-raised border border-border rounded-lg p-4 overflow-x-auto text-[12px] font-mono leading-[1.6] text-foreground">
-                  <code>{token.content}</code>
-                </pre>
-              </div>
-            )
-          case 'hr':
-            return <hr key={i} className="my-6 border-border" />
-          case 'blockquote':
-            return (
-              <blockquote key={i} className="border-l-3 border-accent pl-4 py-1 bg-accent-light/30 rounded-r-lg">
-                <div className="text-[13px] text-foreground leading-relaxed">
-                  {token.content.split('\n').map((line, j) => (
-                    <p key={j}>{renderInlineMarkdown(line)}</p>
-                  ))}
-                </div>
-              </blockquote>
-            )
-          case 'table': {
-            if (!token.rows || token.rows.length === 0) return null
-            const [header, ...body] = token.rows
-            return (
-              <div key={i} className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full text-[12px]">
-                  <thead>
-                    <tr className="bg-surface-raised">
-                      {header.map((cell, j) => (
-                        <th key={j} className="px-3 py-2 text-left font-semibold text-foreground border-r border-border last:border-r-0">
-                          {renderInlineMarkdown(cell)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {body.map((row, j) => (
-                      <tr key={j} className="border-t border-border hover:bg-surface-raised/50">
-                        {row.map((cell, k) => (
-                          <td key={k} className="px-3 py-2 text-foreground border-r border-border last:border-r-0">
-                            {renderInlineMarkdown(cell)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          }
-          case 'empty':
-            return <div key={i} className="h-3" />
-          case 'html':
-            return null // skip HTML comments
-          default:
-            return null
-        }
-      })}
-    </div>
-  )
+interface LineCommentReply {
+  id: string
+  author: string
+  authorRole: 'solomon' | 'dawn' | 'agent' | 'team'
+  body: string
+  createdAt: Date
 }
 
-// ─── Syntax Highlighting for Code Files ──────────────────────────────
+// ─── Mock Data ───────────────────────────────────────────────────────
 
-function CodeRenderer({ content, language }: { content: string; language?: string }) {
-  return (
-    <div className="relative">
-      {language && (
-        <div className="sticky top-0 px-4 py-2 text-[11px] font-mono text-muted bg-surface-raised border-b border-border flex items-center gap-2">
-          <Code2 size={14} />
-          {language}
-        </div>
-      )}
-      <pre className="p-4 overflow-x-auto text-[12px] font-mono leading-[1.6] text-foreground">
-        <code>{content}</code>
-      </pre>
-    </div>
-  )
-}
+const MOCK_FILES: ResourceFile[] = [
+  {
+    id: 'r1', title: 'CRM Adoption Guide.pdf', type: 'Document', extension: 'pdf',
+    size: '2.4 MB', sizeBytes: 2400000,
+    createdAt: new Date(Date.now() - 14 * 86400000),
+    updatedAt: new Date(Date.now() - 2 * 86400000),
+    uploadedBy: 'Solomon', lastEditedBy: 'DAWN', version: 3,
+    tags: ['CRM', 'Guide'], description: 'Complete guide to CRM adoption for Kampala SMEs',
+    content: '', path: '', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'Solomon', editedAt: new Date(Date.now() - 14 * 86400000), summary: 'Initial upload' },
+      { version: 2, editedBy: 'DAWN', editedAt: new Date(Date.now() - 7 * 86400000), summary: 'Added Kampala-specific examples' },
+      { version: 3, editedBy: 'Solomon', editedAt: new Date(Date.now() - 2 * 86400000), summary: 'Final review and formatting' },
+    ]
+  },
+  {
+    id: 'r2', title: 'Kampala SME Outreach List.csv', type: 'Spreadsheet', extension: 'csv',
+    size: '156 KB', sizeBytes: 156000,
+    createdAt: new Date(Date.now() - 10 * 86400000),
+    updatedAt: new Date(Date.now() - 3 * 86400000),
+    uploadedBy: 'DAWN', lastEditedBy: 'Solomon', version: 2,
+    tags: ['Leads', 'Outreach'], description: 'Curated list of 200+ SMEs in Kampala for outreach campaigns',
+    content: '', path: '', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'DAWN', editedAt: new Date(Date.now() - 10 * 86400000), summary: 'Auto-generated from web scraping' },
+      { version: 2, editedBy: 'Solomon', editedAt: new Date(Date.now() - 3 * 86400000), summary: 'Cleaned duplicates, added contact info' },
+    ]
+  },
+  {
+    id: 'r3', title: 'Brand Guidelines v2.pdf', type: 'Document', extension: 'pdf',
+    size: '8.1 MB', sizeBytes: 8100000,
+    createdAt: new Date(Date.now() - 30 * 86400000),
+    updatedAt: new Date(Date.now() - 5 * 86400000),
+    uploadedBy: 'Solomon', lastEditedBy: 'Solomon', version: 2,
+    tags: ['Brand', 'Design'], description: 'Regent brand guidelines including colors, typography, and logo usage',
+    content: '', path: '', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'Solomon', editedAt: new Date(Date.now() - 30 * 86400000), summary: 'Initial version' },
+      { version: 2, editedBy: 'Solomon', editedAt: new Date(Date.now() - 5 * 86400000), summary: 'Updated color palette' },
+    ]
+  },
+  {
+    id: 'r4', title: 'Instagram Template Pack.zip', type: 'Archive', extension: 'zip',
+    size: '45 MB', sizeBytes: 45000000,
+    createdAt: new Date(Date.now() - 21 * 86400000),
+    updatedAt: new Date(Date.now() - 7 * 86400000),
+    uploadedBy: 'Solomon', lastEditedBy: 'DAWN', version: 1,
+    tags: ['Content', 'Social'], description: 'Canva templates for Instagram carousels and stories',
+    content: '', path: '', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'Solomon', editedAt: new Date(Date.now() - 21 * 86400000), summary: 'Initial upload' },
+    ]
+  },
+  {
+    id: 'r5', title: 'Q2 Revenue Report.xlsx', type: 'Spreadsheet', extension: 'xlsx',
+    size: '892 KB', sizeBytes: 892000,
+    createdAt: new Date(Date.now() - 60 * 86400000),
+    updatedAt: new Date(Date.now() - 10 * 86400000),
+    uploadedBy: 'DAWN', lastEditedBy: 'DAWN', version: 4,
+    tags: ['Reports', 'Revenue'], description: 'Q2 2025 revenue breakdown by client and service line',
+    content: '', path: '', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'DAWN', editedAt: new Date(Date.now() - 60 * 86400000), summary: 'Auto-generated from CRM data' },
+      { version: 2, editedBy: 'Solomon', editedAt: new Date(Date.now() - 45 * 86400000), summary: 'Added client breakdown' },
+      { version: 3, editedBy: 'DAWN', editedAt: new Date(Date.now() - 20 * 86400000), summary: 'Updated with May data' },
+      { version: 4, editedBy: 'DAWN', editedAt: new Date(Date.now() - 10 * 86400000), summary: 'Final Q2 numbers' },
+    ]
+  },
+  {
+    id: 'r6', title: 'Client Onboarding Script.md', type: 'Document', extension: 'md',
+    size: '12 KB', sizeBytes: 12000,
+    createdAt: new Date(Date.now() - 45 * 86400000),
+    updatedAt: new Date(Date.now() - 14 * 86400000),
+    uploadedBy: 'Solomon', lastEditedBy: 'DAWN', version: 5,
+    tags: ['CRM', 'Process'], description: 'Standardized onboarding script for new Regent clients',
+    content: `# Client Onboarding Script
 
-// ─── Resource Viewer ─────────────────────────────────────────────────
+## Phase 1: Discovery Call
 
-function getFileExtension(url: string): string {
-  const match = url.match(/\.([a-z0-9]+)(?:\?.*)?$/i)
-  return match ? match[1].toLowerCase() : ''
-}
+1. **Introduction** (5 min)
+   - Welcome the client
+   - Agenda overview
+   - Set expectations
 
-function isCodeFile(ext: string): boolean {
-  return ['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'rb', 'java', 'c', 'cpp', 'h', 'hpp',
-    'css', 'scss', 'less', 'json', 'yaml', 'yml', 'xml', 'sql', 'sh', 'bash', 'zsh',
-    'md', 'mdx', 'txt', 'env', 'toml', 'ini', 'cfg', 'conf'].includes(ext)
-}
+2. **Needs Assessment** (15 min)
+   - What are your current pain points?
+   - What tools are you using?
+   - What's your budget?
 
-function isImageFile(ext: string): boolean {
-  return ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(ext)
-}
+3. **Solution Overview** (10 min)
+   - Present Regent CRM
+   - Show relevant features
+   - Share case studies
 
-function isMarkdownFile(ext: string, title: string): boolean {
-  return ext === 'md' || ext === 'mdx' || title.endsWith('.md') || title.endsWith('.mdx')
-}
+4. **Next Steps** (5 min)
+   - Schedule demo
+   - Send proposal
+   - Follow-up in 48h
 
-function ResourceViewer({
-  resource,
-  content,
-  loading,
-  error,
-  onClose
-}: {
-  resource: Resource
-  content: string | null
-  loading: boolean
-  error: boolean
-  onClose: () => void
-}) {
-  const ext = resource.url ? getFileExtension(resource.url) : ''
-  const isMd = isMarkdownFile(ext, resource.title)
-  const isCode = isCodeFile(ext) && !isMd
-  const isImg = isImageFile(ext)
+## Phase 2: Demo
 
-  const renderContent = () => {
-    if (loading) {
-      return (
-        <div className="space-y-4 animate-pulse p-6">
-          <div className="h-6 bg-surface-raised rounded w-3/4" />
-          <div className="h-4 bg-surface-raised rounded w-1/2" />
-          <div className="h-4 bg-surface-raised rounded w-5/6" />
-          <div className="h-4 bg-surface-raised rounded w-2/3" />
-          <div className="h-4 bg-surface-raised rounded w-4/5" />
-          <div className="h-4 bg-surface-raised rounded w-3/4" />
-        </div>
-      )
-    }
+> "Show, don't tell. Let them click around."
 
-    if (error) {
-      return (
-        <div className="flex flex-col items-center justify-center h-64 text-muted gap-3">
-          <AlertCircle size={32} className="text-warning" />
-          <p className="text-[13px]">Failed to load document content.</p>
-          <p className="text-[11px]">The file may not exist or there was a network error.</p>
-        </div>
-      )
-    }
+## Phase 3: Onboarding
 
-    if (!content) {
-      return (
-        <div className="flex flex-col items-center justify-center h-40 text-muted gap-2">
-          <FileText size={28} />
-          <p className="text-[13px]">No content available for this resource.</p>
-        </div>
-      )
-    }
+- Account setup (24h)
+- Data migration (48h)
+- Team training (2h session)
+- Go-live support (1 week)`,
+    path: '', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'Solomon', editedAt: new Date(Date.now() - 45 * 86400000), summary: 'Initial draft' },
+      { version: 2, editedBy: 'DAWN', editedAt: new Date(Date.now() - 40 * 86400000), summary: 'Added discovery questions' },
+      { version: 3, editedBy: 'Solomon', editedAt: new Date(Date.now() - 30 * 86400000), summary: 'Restructured phases' },
+      { version: 4, editedBy: 'DAWN', editedAt: new Date(Date.now() - 20 * 86400000), summary: 'Added objection handling' },
+      { version: 5, editedBy: 'DAWN', editedAt: new Date(Date.now() - 14 * 86400000), summary: 'Final polish' },
+    ]
+  },
+  {
+    id: 'r7', title: 'DAWN Control Center — Implementation Plan', type: 'Plan', extension: 'md',
+    size: '26 KB', sizeBytes: 26000,
+    createdAt: new Date(Date.now() - 1 * 86400000),
+    updatedAt: new Date(Date.now()),
+    uploadedBy: 'DAWN', lastEditedBy: 'DAWN', version: 2,
+    tags: ['Strategy', 'Product', 'Architecture'],
+    description: 'Full implementation plan for the DAWN Control Center evolution — performance, project management, Slack integration, and Palantir-inspired features',
+    content: '', path: '/resources/implementation-plan.md', isPublic: true, editHistory: [
+      { version: 1, editedBy: 'DAWN', editedAt: new Date(Date.now() - 1 * 86400000), summary: 'Initial research and plan' },
+      { version: 2, editedBy: 'DAWN', editedAt: new Date(Date.now()), summary: 'Updated with Solomon feedback' },
+    ]
+  },
+]
 
-    if (isMd) {
-      return (
-        <div className="p-6">
-          <MarkdownRenderer content={content} />
-        </div>
-      )
-    }
+// ─── Mock Comments ───────────────────────────────────────────────────
 
-    if (isCode) {
-      return <CodeRenderer content={content} language={ext} />
-    }
+const MOCK_COMMENTS: LineComment[] = [
+  {
+    id: 'c1', fileId: 'r6', lineNumber: 8,
+    author: 'Solomon', authorRole: 'solomon',
+    body: 'We should add a question about their current tech stack here.',
+    createdAt: new Date(Date.now() - 3 * 86400000),
+    updatedAt: new Date(Date.now() - 3 * 86400000),
+    resolved: true, resolvedBy: 'DAWN', resolvedAt: new Date(Date.now() - 2 * 86400000),
+    replies: [
+      {
+        id: 'c1r1', author: 'DAWN', authorRole: 'dawn',
+        body: 'Good idea. I\'ll add "What CRM/ERP are you currently using?" as a follow-up.',
+        createdAt: new Date(Date.now() - 2.5 * 86400000),
+      },
+      {
+        id: 'c1r2', author: 'Solomon', authorRole: 'solomon',
+        body: 'Perfect, that\'s exactly what I was thinking.',
+        createdAt: new Date(Date.now() - 2 * 86400000),
+      },
+    ]
+  },
+  {
+    id: 'c2', fileId: 'r6', lineNumber: 22,
+    author: 'DAWN', authorRole: 'dawn',
+    body: 'Should we add a section about pricing discussion here? Some clients ask early.',
+    createdAt: new Date(Date.now() - 1 * 86400000),
+    updatedAt: new Date(Date.now() - 1 * 86400000),
+    resolved: false,
+    replies: []
+  },
+  {
+    id: 'c3', fileId: 'r6', lineNumber: 35,
+    author: 'Solomon', authorRole: 'solomon',
+    body: 'The training session should be 3 hours, not 2. We always run over.',
+    createdAt: new Date(Date.now() - 12 * 86400000),
+    updatedAt: new Date(Date.now() - 12 * 86400000),
+    resolved: true, resolvedBy: 'DAWN', resolvedAt: new Date(Date.now() - 10 * 86400000),
+    replies: [
+      {
+        id: 'c3r1', author: 'DAWN', authorRole: 'dawn',
+        body: 'Updated to 3 hours in v3. Also added a 30-min buffer for Q&A.',
+        createdAt: new Date(Date.now() - 10 * 86400000),
+      },
+    ]
+  },
+]
 
-    if (isImg) {
-      return (
-        <div className="flex items-center justify-center p-6">
-          <img
-            src={resource.url}
-            alt={resource.title}
-            className="max-w-full max-h-[70vh] rounded-lg object-contain"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none'
-            }}
-          />
-        </div>
-      )
-    }
-
-    // Plain text fallback
-    return (
-      <pre className="p-6 text-[13px] font-mono leading-relaxed text-foreground whitespace-pre-wrap">
-        {content}
-      </pre>
-    )
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 pb-8 px-4">
-      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-4xl max-h-[85vh] bg-base border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col z-10 animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={cn(
-              'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-              typeColors[resource.type] || 'bg-surface-raised text-muted'
-            )}>
-              {typeIcons[resource.type] || <FileText size={16} />}
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold text-foreground truncate">{resource.title}</h2>
-              <div className="flex items-center gap-2 text-[11px] text-muted">
-                <span>{resource.type}</span>
-                <span>·</span>
-                <span>{resource.size}</span>
-                <span>·</span>
-                <span>Updated {formatRelativeTime(resource.updatedAt)}</span>
-                {ext && (
-                  <>
-                    <span>·</span>
-                    <span className="font-mono">.{ext}</span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            {resource.url && (
-              <a
-                href={resource.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
-                title="Open in new tab"
-              >
-                <ExternalLink size={16} />
-              </a>
-            )}
-            <button
-              onClick={onClose}
-              className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {renderContent()}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Icons & Colors ──────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────
 
 const typeIcons: Record<string, React.ReactNode> = {
   Document: <FileText size={16} />,
   Spreadsheet: <FileSpreadsheet size={16} />,
-  Archive: <Archive size={16} />,
+  Archive: <FolderOpen size={16} />,
   Image: <Image size={16} />,
   Code: <Code size={16} />,
   Plan: <Target size={16} />,
@@ -550,104 +271,610 @@ const typeColors: Record<string, string> = {
   Guide: 'bg-purple/10 text-purple',
 }
 
-// ─── Mock Resources ──────────────────────────────────────────────────
+const extColors: Record<string, string> = {
+  md: 'bg-blue-500/10 text-blue-400',
+  pdf: 'bg-red-500/10 text-red-400',
+  csv: 'bg-green-500/10 text-green-400',
+  xlsx: 'bg-emerald-500/10 text-emerald-400',
+  zip: 'bg-amber-500/10 text-amber-400',
+  ts: 'bg-indigo-500/10 text-indigo-400',
+  tsx: 'bg-indigo-500/10 text-indigo-400',
+  py: 'bg-yellow-500/10 text-yellow-400',
+  json: 'bg-gray-500/10 text-gray-400',
+}
 
-const mockResources: Resource[] = [
-  {
-    id: 'r1', title: 'CRM Adoption Guide.pdf', type: 'Document', size: '2.4 MB',
-    updatedAt: new Date(Date.now() - 2 * 86400000), tags: ['CRM', 'Guide'],
-    description: 'Complete guide to CRM adoption for Kampala SMEs',
-  },
-  {
-    id: 'r2', title: 'Kampala SME Outreach List.csv', type: 'Spreadsheet', size: '156 KB',
-    updatedAt: new Date(Date.now() - 3 * 86400000), tags: ['Leads', 'Outreach'],
-    description: 'Curated list of 200+ SMEs in Kampala for outreach campaigns',
-  },
-  {
-    id: 'r3', title: 'Brand Guidelines v2.pdf', type: 'Document', size: '8.1 MB',
-    updatedAt: new Date(Date.now() - 5 * 86400000), tags: ['Brand', 'Design'],
-    description: 'Regent brand guidelines including colors, typography, and logo usage',
-  },
-  {
-    id: 'r4', title: 'Instagram Template Pack.zip', type: 'Archive', size: '45 MB',
-    updatedAt: new Date(Date.now() - 7 * 86400000), tags: ['Content', 'Social'],
-    description: 'Canva templates for Instagram carousels and stories',
-  },
-  {
-    id: 'r5', title: 'Q2 Revenue Report.xlsx', type: 'Spreadsheet', size: '892 KB',
-    updatedAt: new Date(Date.now() - 10 * 86400000), tags: ['Reports', 'Revenue'],
-    description: 'Q2 2025 revenue breakdown by client and service line',
-  },
-  {
-    id: 'r6', title: 'Client Onboarding Script.md', type: 'Document', size: '12 KB',
-    updatedAt: new Date(Date.now() - 14 * 86400000), tags: ['CRM', 'Process'],
-    description: 'Standardized onboarding script for new Regent clients',
-  },
-  {
-    id: 'r7', title: 'DAWN Control Center — Implementation Plan', type: 'Plan', size: '26 KB',
-    updatedAt: new Date(Date.now()), tags: ['Strategy', 'Product', 'Architecture'],
-    description: 'Full implementation plan for the DAWN Control Center evolution — performance, project management, Slack integration, and Palantir-inspired features',
-    url: '/resources/implementation-plan.md',
-  },
-]
+const roleColors: Record<string, string> = {
+  solomon: 'bg-accent text-white',
+  dawn: 'bg-purple text-white',
+  agent: 'bg-cyan-500 text-white',
+  team: 'bg-surface-raised text-foreground',
+}
 
-// ─── Page Component ──────────────────────────────────────────────────
+const roleLabels: Record<string, string> = {
+  solomon: 'S',
+  dawn: 'D',
+  agent: 'A',
+  team: 'T',
+}
 
-export default function ResourcesPage() {
-  const [search, setSearch] = useState('')
-  const [filterTag, setFilterTag] = useState<string | null>(null)
-  const [selectedResource, setSelectedResource] = useState<Resource | null>(null)
-  const [fileContent, setFileContent] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(false)
+function getFileExtension(filename: string): string {
+  return filename.split('.').pop()?.toLowerCase() || ''
+}
 
-  const allTags = useMemo(
-    () => Array.from(new Set(mockResources.flatMap(r => r.tags))),
-    []
+function isEditable(ext: string): boolean {
+  return ['md', 'txt', 'ts', 'tsx', 'js', 'jsx', 'py', 'json', 'css', 'html', 'yaml', 'yml', 'toml', 'env', 'csv'].includes(ext)
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 10)
+}
+
+// ─── Markdown Renderer ──────────────────────────────────────────────
+
+function renderMarkdownLine(line: string, index: number): { html: string; key: number } {
+  // Headings
+  if (line.startsWith('# ')) return { html: `<h1 class="text-[22px] font-bold text-foreground mt-6 mb-3">${line.slice(2)}</h1>`, key: index }
+  if (line.startsWith('## ')) return { html: `<h2 class="text-[17px] font-semibold text-foreground mt-5 mb-2">${line.slice(3)}</h2>`, key: index }
+  if (line.startsWith('### ')) return { html: `<h3 class="text-[14px] font-semibold text-foreground mt-4 mb-1.5">${line.slice(4)}</h3>`, key: index }
+  if (line.startsWith('#### ')) return { html: `<h4 class="text-[13px] font-semibold text-foreground mt-3 mb-1">${line.slice(5)}</h4>`, key: index }
+
+  // Horizontal rule
+  if (line.startsWith('---')) return { html: `<hr class="my-6 border-border" />`, key: index }
+
+  // Blockquote
+  if (line.startsWith('> ')) {
+    const content = line.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    return { html: `<blockquote class="border-l-2 border-accent pl-4 py-1 my-2 text-[13px] text-muted italic">${content}</blockquote>`, key: index }
+  }
+
+  // Unordered list
+  if (line.startsWith('- ')) {
+    const content = line.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code class="bg-surface-raised px-1 rounded text-[11px] font-mono">$1</code>')
+    return { html: `<li class="text-[13px] text-foreground ml-5 list-disc py-0.5">${content}</li>`, key: index }
+  }
+
+  // Ordered list
+  if (/^\d+\.\s/.test(line)) {
+    const content = line.replace(/^\d+\.\s/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code class="bg-surface-raised px-1 rounded text-[11px] font-mono">$1</code>')
+    return { html: `<li class="text-[13px] text-foreground ml-5 list-decimal py-0.5">${content}</li>`, key: index }
+  }
+
+  // Code block markers
+  if (line.startsWith('```')) {
+    const lang = line.slice(3).trim()
+    return { html: lang ? `<div class="text-[11px] text-muted font-mono mt-3 mb-1">${lang}</div>` : '', key: index, isCodeBlock: true }
+  }
+
+  // Table row
+  if (line.startsWith('|')) {
+    const cells = line.split('|').filter(c => c.trim()).map(c => c.trim())
+    const isHeader = line.includes('---')
+    if (isHeader) return { html: '', key: index }
+    const tag = 'td'
+    const cellHtml = cells.map(c => `<${tag} class="px-3 py-1.5 text-[12px] border-b border-border">${c}</${tag}>`).join('')
+    return { html: `<tr>${cellHtml}</tr>`, key: index }
+  }
+
+  // Empty line
+  if (line.trim() === '') return { html: '<div class="h-2"></div>', key: index }
+
+  // Regular paragraph with inline formatting
+  let html = line
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code class="bg-surface-raised px-1.5 rounded text-[11px] font-mono text-accent">$1</code>')
+    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" class="text-accent hover:underline" target="_blank">$1</a>')
+
+  return { html: `<p class="text-[13px] text-foreground leading-relaxed">${html}</p>`, key: index }
+}
+
+// ─── Line Comment Sidebar Component ─────────────────────────────────
+
+function LineCommentThread({
+  comment,
+  onResolve,
+  onReply,
+  onDelete,
+}: {
+  comment: LineComment
+  onResolve: (id: string) => void
+  onReply: (id: string, body: string) => void
+  onDelete: (id: string) => void
+}) {
+  const [replyOpen, setReplyOpen] = useState(false)
+  const [replyText, setReplyText] = useState('')
+
+  return (
+    <div className={cn(
+      'rounded-lg border p-3 mb-2',
+      comment.resolved ? 'border-success/30 bg-success/5' : 'border-border bg-surface'
+    )}>
+      {/* Comment header */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={cn(
+            'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0',
+            roleColors[comment.authorRole]
+          )}>
+            {roleLabels[comment.authorRole]}
+          </span>
+          <span className="text-[12px] font-semibold text-foreground truncate">{comment.author}</span>
+          <span className="text-[10px] text-muted shrink-0">{formatRelativeTime(comment.createdAt)}</span>
+          {comment.resolved && (
+            <span className="flex items-center gap-1 text-[10px] text-success">
+              <Check size={10} /> Resolved
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {!comment.resolved && (
+            <button
+              onClick={() => onResolve(comment.id)}
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-raised text-muted hover:text-success transition-colors"
+              title="Resolve"
+            >
+              <Check size={12} />
+            </button>
+          )}
+          <button
+            onClick={() => onDelete(comment.id)}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-raised text-muted hover:text-error transition-colors"
+            title="Delete"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Comment body */}
+      <p className="text-[12px] text-foreground leading-relaxed mb-2">{comment.body}</p>
+
+      {/* Line reference */}
+      <div className="flex items-center gap-1 mb-2">
+        <Hash size={10} className="text-muted" />
+        <span className="text-[10px] text-muted font-mono">Line {comment.lineNumber}</span>
+      </div>
+
+      {/* Replies */}
+      {comment.replies.length > 0 && (
+        <div className="ml-4 pl-3 border-l border-border space-y-2 mb-2">
+          {comment.replies.map(reply => (
+            <div key={reply.id} className="flex items-start gap-2">
+              <span className={cn(
+                'w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 mt-0.5',
+                roleColors[reply.authorRole]
+              )}>
+                {roleLabels[reply.authorRole]}
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-foreground">{reply.author}</span>
+                  <span className="text-[9px] text-muted">{formatRelativeTime(reply.createdAt)}</span>
+                </div>
+                <p className="text-[11px] text-foreground/80">{reply.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Reply input */}
+      {replyOpen ? (
+        <div className="flex items-start gap-2">
+          <textarea
+            value={replyText}
+            onChange={e => setReplyText(e.target.value)}
+            placeholder="Write a reply..."
+            className="flex-1 min-h-[60px] px-2.5 py-1.5 rounded-lg border border-border bg-base text-[12px] text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-none"
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (replyText.trim()) {
+                  onReply(comment.id, replyText.trim())
+                  setReplyText('')
+                  setReplyOpen(false)
+                }
+              }
+            }}
+          />
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={() => {
+                if (replyText.trim()) {
+                  onReply(comment.id, replyText.trim())
+                  setReplyText('')
+                  setReplyOpen(false)
+                }
+              }}
+              className="w-7 h-7 flex items-center justify-center rounded bg-accent text-white hover:bg-accent/90 transition-colors"
+            >
+              <Check size={12} />
+            </button>
+            <button
+              onClick={() => { setReplyOpen(false); setReplyText('') }}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-raised text-muted transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setReplyOpen(true)}
+          className="flex items-center gap-1 text-[11px] text-muted hover:text-foreground transition-colors"
+        >
+          <Reply size={10} />
+          Reply
+        </button>
+      )}
+    </div>
   )
+}
 
-  const filtered = useMemo(
-    () => mockResources.filter(r => {
-      if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false
-      if (filterTag && !r.tags.includes(filterTag)) return false
-      return true
-    }),
-    [search, filterTag]
-  )
+// ─── File Editor Component ──────────────────────────────────────────
 
-  const handleOpen = useCallback(async (resource: Resource) => {
-    setSelectedResource(resource)
-    setFileContent(null)
-    setError(false)
+function FileEditor({
+  file,
+  content,
+  onSave,
+  onCancel,
+}: {
+  file: ResourceFile
+  content: string
+  onSave: (content: string) => void
+  onCancel: () => void
+}) {
+  const [editedContent, setEditedContent] = useState(content)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const ext = getFileExtension(file.title)
 
-    if (resource.url) {
-      setLoading(true)
-      try {
-        const res = await fetch(resource.url)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const text = await res.text()
-
-        // Check if it's HTML (meaning the file wasn't found as static)
-        if (text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
-          setError(true)
-          setFileContent(null)
-        } else {
-          setFileContent(text)
-          setError(false)
-        }
-      } catch (e) {
-        setError(true)
-        setFileContent(null)
-      }
-      setLoading(false)
+  // Auto-focus
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(0, 0)
     }
   }, [])
 
-  const handleClose = useCallback(() => {
-    setSelectedResource(null)
-    setFileContent(null)
-    setError(false)
+  // Keyboard shortcut: Ctrl+S to save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        onSave(editedContent)
+      }
+      if (e.key === 'Escape') {
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [editedContent, onSave, onCancel])
+
+  const lineCount = editedContent.split('\n').length
+
+  return (
+    <div className={cn(
+      'flex flex-col bg-base rounded-lg border border-border overflow-hidden',
+      isFullscreen ? 'fixed inset-4 z-50 shadow-2xl' : 'flex-1'
+    )}>
+      {/* Editor toolbar */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface shrink-0">
+        <div className="flex items-center gap-2">
+          <span className={cn(
+            'px-1.5 py-0.5 rounded text-[10px] font-mono font-medium',
+            extColors[ext] || 'bg-surface-raised text-muted'
+          )}>
+            .{ext}
+          </span>
+          <span className="text-[11px] text-muted">{lineCount} lines</span>
+          <span className="text-[11px] text-muted">{editedContent.length.toLocaleString()} chars</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+          <div className="w-px h-5 bg-border mx-1" />
+          <button
+            onClick={onCancel}
+            className="px-2.5 py-1 text-[11px] text-muted hover:text-foreground transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(editedContent)}
+            className="px-3 py-1 text-[11px] font-medium bg-accent text-white rounded hover:bg-accent/90 transition-colors flex items-center gap-1.5"
+          >
+            <Save size={12} />
+            Save
+          </button>
+        </div>
+      </div>
+
+      {/* Editor body with line numbers */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Line numbers */}
+        <div className="select-none px-3 py-3 text-right text-[11px] font-mono text-muted/40 border-r border-border bg-surface/50 shrink-0 leading-[20px]">
+          {Array.from({ length: lineCount }, (_, i) => (
+            <div key={i} className="hover:text-muted/70 transition-colors">{i + 1}</div>
+          ))}
+        </div>
+
+        {/* Textarea */}
+        <textarea
+          ref={textareaRef}
+          value={editedContent}
+          onChange={e => setEditedContent(e.target.value)}
+          className="flex-1 px-4 py-3 bg-transparent text-[13px] font-mono text-foreground leading-[20px] resize-none focus:outline-none border-0"
+          spellCheck={false}
+          style={{ tabSize: 2 }}
+        />
+      </div>
+
+      {/* Status bar */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-surface/50 shrink-0">
+        <div className="flex items-center gap-3 text-[10px] text-muted">
+          <span>UTF-8</span>
+          <span>{ext === 'md' ? 'Markdown' : ext.toUpperCase()}</span>
+          <span>Spaces: 2</span>
+        </div>
+        <div className="text-[10px] text-muted">
+          {content !== editedContent ? 'Unsaved changes' : 'Saved'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Markdown Preview Component ─────────────────────────────────────
+
+function MarkdownPreview({ content }: { content: string }) {
+  const lines = content.split('\n')
+  const renderedLines: { html: string; key: number; isCodeBlock?: boolean }[] = []
+  let inCodeBlock = false
+  let codeContent = ''
+  let codeLang = ''
+  let codeStartIndex = 0
+
+  lines.forEach((line, index) => {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        renderedLines.push({
+          html: `<pre class="bg-surface-raised rounded-lg p-4 overflow-x-auto my-3"><code class="text-[12px] font-mono leading-relaxed text-foreground">${codeContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
+          key: codeStartIndex,
+        })
+        codeContent = ''
+        inCodeBlock = false
+      } else {
+        codeLang = line.slice(3).trim()
+        codeStartIndex = index
+        inCodeBlock = true
+      }
+      return
+    }
+
+    if (inCodeBlock) {
+      codeContent += (codeContent ? '\n' : '') + line
+      return
+    }
+
+    // Table detection
+    if (line.startsWith('|') && lines[index + 1]?.startsWith('|')) {
+      // Check if next line is separator
+      if (lines[index + 1]?.includes('---')) {
+        const headers = line.split('|').filter(c => c.trim()).map(c => c.trim())
+        renderedLines.push({
+          html: `<table class="w-full border-collapse my-3"><thead><tr>${headers.map(h => `<th class="px-3 py-2 text-[12px] font-semibold text-foreground text-left border-b-2 border-border bg-surface/50">${h}</th>`).join('')}</tr></thead><tbody>`,
+          key: index,
+        })
+        return
+      }
+      // Data row
+      const cells = line.split('|').filter(c => c.trim()).map(c => c.trim())
+      renderedLines.push({
+        html: `<tr>${cells.map(c => `<td class="px-3 py-1.5 text-[12px] text-foreground border-b border-border">${c}</td>`).join('')}</tr>`,
+        key: index,
+      })
+      return
+    }
+
+    // Close table if we were in one
+    if (renderedLines.length > 0 && renderedLines[renderedLines.length - 1].html.startsWith('<tr>') && !line.startsWith('|')) {
+      renderedLines.push({ html: '</tbody></table>', key: index })
+    }
+
+    const result = renderMarkdownLine(line, index)
+    renderedLines.push(result)
+  })
+
+  // Close any open code block
+  if (inCodeBlock) {
+    renderedLines.push({
+      html: `<pre class="bg-surface-raised rounded-lg p-4 overflow-x-auto my-3"><code class="text-[12px] font-mono leading-relaxed text-foreground">${codeContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
+      key: codeStartIndex,
+    })
+  }
+
+  return (
+    <div className="prose prose-sm max-w-none">
+      {renderedLines.map(({ html, key }) => (
+        <div key={key} dangerouslySetInnerHTML={{ __html: html }} />
+      ))}
+    </div>
+  )
+}
+
+// ─── Main Page Component ─────────────────────────────────────────────
+
+export default function ResourcesPage() {
+  const { state, addNotification, addActivity } = useAppState()
+  const [search, setSearch] = useState('')
+  const [filterTag, setFilterTag] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<ResourceFile | null>(null)
+  const [fileContent, setFileContent] = useState<string | null>(null)
+  const [loadingFile, setLoadingFile] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedContent, setEditedContent] = useState('')
+  const [comments, setComments] = useState<LineComment[]>(MOCK_COMMENTS)
+  const [showComments, setShowComments] = useState(true)
+  const [newCommentLine, setNewCommentLine] = useState<number | null>(null)
+  const [newCommentText, setNewCommentText] = useState('')
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadData, setUploadData] = useState({ title: '', description: '', tags: '' })
+  const [showHistory, setShowHistory] = useState(false)
+  const [activeTab, setActiveTab] = useState<'preview' | 'edit' | 'comments'>('preview')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const allTags = Array.from(new Set(MOCK_FILES.flatMap(r => r.tags)))
+
+  const filtered = MOCK_FILES.filter(r => {
+    if (search && !r.title.toLowerCase().includes(search.toLowerCase()) && !r.description.toLowerCase().includes(search.toLowerCase())) return false
+    if (filterTag && !r.tags.includes(filterTag)) return false
+    return true
+  })
+
+  // Load file content
+  const handleOpen = useCallback(async (file: ResourceFile) => {
+    setSelectedFile(file)
+    setShowComments(true)
+    setActiveTab('preview')
+    setIsEditing(false)
+    setShowHistory(false)
+
+    if (file.path) {
+      setLoadingFile(true)
+      try {
+        const res = await fetch(file.path)
+        const text = await res.text()
+        // Check if we got HTML (file not found, returned page)
+        if (text.trim().startsWith('<!') || text.trim().startsWith('<html')) {
+          setFileContent(file.content || '// File content not available for preview')
+        } else {
+          setFileContent(text)
+        }
+      } catch (e) {
+        setFileContent(file.content || '// Error loading file content')
+      }
+      setLoadingFile(false)
+    } else if (file.content) {
+      setFileContent(file.content)
+    } else {
+      setFileContent('// Binary file — preview not available')
+    }
   }, [])
+
+  // Save edited content
+  const handleSave = useCallback((newContent: string) => {
+    if (!selectedFile) return
+    setFileContent(newContent)
+    setIsEditing(false)
+    // Update the file in mock data
+    const idx = MOCK_FILES.findIndex(f => f.id === selectedFile.id)
+    if (idx !== -1) {
+      MOCK_FILES[idx] = {
+        ...MOCK_FILES[idx],
+        content: newContent,
+        updatedAt: new Date(),
+        lastEditedBy: 'Solomon',
+        version: MOCK_FILES[idx].version + 1,
+        editHistory: [
+          ...MOCK_FILES[idx].editHistory,
+          { version: MOCK_FILES[idx].version + 1, editedBy: 'Solomon', editedAt: new Date(), summary: 'Edited in Control Center' }
+        ]
+      }
+      setSelectedFile(MOCK_FILES[idx])
+    }
+    addNotification({ type: 'update', icon: 'CheckCircle', title: 'File saved', description: `${selectedFile.title} updated`, timestamp: new Date(), screen: '/resources' })
+    addActivity({ badge: 'TASK_COMPLETE', title: 'File edited', description: `${selectedFile.title} updated to v${MOCK_FILES[idx]?.version || '?'}` })
+  }, [selectedFile, addNotification, addActivity])
+
+  // Add comment
+  const handleAddComment = useCallback((lineNumber: number) => {
+    if (!selectedFile || !newCommentText.trim()) return
+    const comment: LineComment = {
+      id: generateId(),
+      fileId: selectedFile.id,
+      lineNumber,
+      author: 'Solomon',
+      authorRole: 'solomon',
+      body: newCommentText.trim(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      resolved: false,
+      replies: [],
+    }
+    setComments(prev => [comment, ...prev])
+    setNewCommentText('')
+    setNewCommentLine(null)
+    addNotification({ type: 'update', icon: 'MessageSquare', title: 'Comment added', description: `Line ${lineNumber}: ${comment.body.slice(0, 60)}...`, timestamp: new Date(), screen: '/resources' })
+  }, [selectedFile, newCommentText, addNotification])
+
+  // Resolve comment
+  const handleResolveComment = useCallback((commentId: string) => {
+    setComments(prev => prev.map(c =>
+      c.id === commentId ? { ...c, resolved: true, resolvedBy: 'Solomon', resolvedAt: new Date() } : c
+    ))
+  }, [])
+
+  // Reply to comment
+  const handleReplyToComment = useCallback((commentId: string, body: string) => {
+    const reply: LineCommentReply = {
+      id: generateId(),
+      author: 'Solomon',
+      authorRole: 'solomon',
+      body,
+      createdAt: new Date(),
+    }
+    setComments(prev => prev.map(c =>
+      c.id === commentId ? { ...c, replies: [...c.replies, reply] } : c
+    ))
+  }, [])
+
+  // Delete comment
+  const handleDeleteComment = useCallback((commentId: string) => {
+    setComments(prev => prev.filter(c => c.id !== commentId))
+  }, [])
+
+  // Upload file
+  const handleUpload = useCallback(() => {
+    if (!uploadData.title) return
+    const newFile: ResourceFile = {
+      id: generateId(),
+      title: uploadData.title,
+      type: 'Document',
+      extension: getFileExtension(uploadData.title),
+      size: '0 B',
+      sizeBytes: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      uploadedBy: 'Solomon',
+      lastEditedBy: 'Solomon',
+      version: 1,
+      tags: uploadData.tags.split(',').map(t => t.trim()).filter(Boolean),
+      description: uploadData.description,
+      content: '',
+      path: '',
+      isPublic: true,
+      editHistory: [{ version: 1, editedBy: 'Solomon', editedAt: new Date(), summary: 'Initial upload' }],
+    }
+    MOCK_FILES.unshift(newFile)
+    setShowUploadModal(false)
+    setUploadData({ title: '', description: '', tags: '' })
+    addNotification({ type: 'completed', icon: 'Upload', title: 'File uploaded', description: newFile.title, timestamp: new Date(), screen: '/resources' })
+  }, [uploadData, addNotification])
+
+  // File comments for current file
+  const fileComments = comments.filter(c => c.fileId === selectedFile?.id).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  const unresolvedCount = fileComments.filter(c => !c.resolved).length
 
   return (
     <div className="max-w-content mx-auto px-4 md:px-8 py-6 md:py-8">
@@ -655,7 +882,13 @@ export default function ResourcesPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-[24px] font-semibold text-foreground">Resource Hub</h1>
-          <p className="text-[13px] text-muted mt-1">{mockResources.length} resources</p>
+          <p className="text-[13px] text-muted mt-1">{MOCK_FILES.length} resources · {MOCK_FILES.reduce((sum, f) => sum + f.editHistory.length, 0)} total edits</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setShowUploadModal(true)}>
+            <Upload size={14} />
+            Upload
+          </Button>
         </div>
       </div>
 
@@ -689,68 +922,489 @@ export default function ResourcesPage() {
         </div>
       </div>
 
-      {/* Resource List */}
-      <div className="space-y-2">
-        {filtered.length === 0 ? (
-          <Card className="p-8 text-center">
-            <FolderOpen size={40} className="mx-auto text-muted mb-3" />
-            <p className="text-[14px] text-muted">No resources found.</p>
-          </Card>
-        ) : (
-          filtered.map(resource => (
-            <div
-              key={resource.id}
-              className="bg-base border border-border rounded-[8px] p-4 flex items-center gap-4 hover:border-accent/30 transition-colors cursor-pointer"
-              onClick={() => handleOpen(resource)}
-            >
-              <div className={cn(
-                'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-                typeColors[resource.type] || 'bg-surface-raised text-muted'
-              )}>
-                {typeIcons[resource.type] || <FileText size={16} />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] font-semibold text-foreground truncate">{resource.title}</h3>
-                <p className="text-[11px] text-muted mt-0.5 line-clamp-1">{resource.description}</p>
-                <div className="flex items-center gap-3 text-[11px] text-muted mt-1">
-                  <span>{resource.type}</span>
-                  <span>·</span>
-                  <span>{resource.size}</span>
-                  <span>·</span>
-                  <span>Updated {formatRelativeTime(resource.updatedAt)}</span>
+      {/* Main layout: file list + viewer */}
+      <div className="flex gap-4">
+        {/* File list */}
+        <div className={cn('space-y-2', selectedFile ? 'w-[380px] shrink-0' : 'flex-1')}>
+          {filtered.length === 0 ? (
+            <Card className="p-8 text-center">
+              <FolderOpen size={40} className="mx-auto text-muted mb-3" />
+              <p className="text-[14px] text-muted">No resources found.</p>
+              <Button variant="secondary" size="sm" className="mt-3" onClick={() => setShowUploadModal(true)}>
+                <Plus size={14} />
+                Upload your first resource
+              </Button>
+            </Card>
+          ) : (
+            filtered.map(resource => {
+              const ext = getFileExtension(resource.title)
+              const fileCommentCount = comments.filter(c => c.fileId === resource.id).length
+              const fileUnresolved = comments.filter(c => c.fileId === resource.id && !c.resolved).length
+
+              return (
+                <div
+                  key={resource.id}
+                  className={cn(
+                    'bg-base border border-border rounded-[8px] p-3 flex items-center gap-3 transition-colors cursor-pointer',
+                    selectedFile?.id === resource.id ? 'border-accent/50 bg-accent/5' : 'hover:border-accent/30'
+                  )}
+                  onClick={() => handleOpen(resource)}
+                >
+                  <div className={cn(
+                    'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                    extColors[ext] || typeColors[resource.type] || 'bg-surface-raised text-muted'
+                  )}>
+                    {ext === 'md' ? <FileText size={15} /> : ext === 'pdf' ? <FileText size={15} /> : ext === 'csv' || ext === 'xlsx' ? <FileSpreadsheet size={15} /> : ext === 'zip' ? <FolderOpen size={15} /> : typeIcons[resource.type] || <FileText size={15} />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[12px] font-semibold text-foreground truncate">{resource.title}</h3>
+                      {isEditable(ext) && (
+                        <FileEdit size={10} className="text-muted shrink-0" />
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted mt-0.5 line-clamp-1">{resource.description}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-muted mt-1">
+                      <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono', extColors[ext] || 'bg-surface-raised text-muted')}>
+                        .{ext}
+                      </span>
+                      <span>{resource.size}</span>
+                      <span>v{resource.version}</span>
+                      <span>·</span>
+                      <span className="flex items-center gap-1">
+                        <User size={9} />
+                        {resource.lastEditedBy}
+                      </span>
+                      {fileCommentCount > 0 && (
+                        <>
+                          <span>·</span>
+                          <span className={cn(
+                            'flex items-center gap-1',
+                            fileUnresolved > 0 ? 'text-warning' : 'text-muted'
+                          )}>
+                            <MessageCircle size={9} />
+                            {fileUnresolved > 0 ? `${fileUnresolved} open` : `${fileCommentCount}`}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-muted shrink-0" />
                 </div>
-                <div className="flex gap-1.5 mt-1.5">
-                  {resource.tags.map(tag => (
-                    <span key={tag} className="px-1.5 py-0.5 rounded bg-surface-raised text-[10px] text-muted">
+              )
+            })
+          )}
+        </div>
+
+        {/* File viewer */}
+        {selectedFile && (
+          <div className="flex-1 min-w-0">
+            <div className="bg-base border border-border rounded-xl overflow-hidden">
+              {/* Viewer header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <div className="flex items-center gap-3 min-w-0">
+                  <button
+                    onClick={() => { setSelectedFile(null); setFileContent(null); setIsEditing(false) }}
+                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-raised text-muted hover:text-foreground transition-colors shrink-0"
+                  >
+                    <ArrowLeft size={14} />
+                  </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-[14px] font-semibold text-foreground truncate">{selectedFile.title}</h2>
+                      <span className={cn(
+                        'px-1.5 py-0.5 rounded text-[9px] font-mono font-medium',
+                        extColors[getFileExtension(selectedFile.title)] || 'bg-surface-raised text-muted'
+                      )}>
+                        .{getFileExtension(selectedFile.title)}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-accent-light text-accent text-[9px] font-medium">
+                        v{selectedFile.version}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-muted mt-0.5">
+                      <span className="flex items-center gap-1">
+                        <User size={9} />
+                        {selectedFile.uploadedBy}
+                      </span>
+                      <span>Uploaded {formatRelativeTime(selectedFile.createdAt)}</span>
+                      <span>·</span>
+                      <span className="flex items-center gap-1">
+                        <Edit3 size={9} />
+                        {selectedFile.lastEditedBy}
+                      </span>
+                      <span>Edited {formatRelativeTime(selectedFile.updatedAt)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* Edit button (only for editable files) */}
+                  {isEditable(getFileExtension(selectedFile.title)) && !isEditing && (
+                    <button
+                      onClick={() => { setIsEditing(true); setEditedContent(fileContent || ''); setActiveTab('edit') }}
+                      className="px-2.5 py-1.5 text-[11px] font-medium bg-accent text-white rounded hover:bg-accent/90 transition-colors flex items-center gap-1.5"
+                    >
+                      <Edit3 size={12} />
+                      Edit
+                    </button>
+                  )}
+                  {/* History button */}
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className={cn(
+                      'w-7 h-7 flex items-center justify-center rounded transition-colors',
+                      showHistory ? 'bg-accent-light text-accent' : 'hover:bg-surface-raised text-muted hover:text-foreground'
+                    )}
+                    title="Edit history"
+                  >
+                    <History size={13} />
+                  </button>
+                  {/* Comments toggle */}
+                  <button
+                    onClick={() => setShowComments(!showComments)}
+                    className={cn(
+                      'w-7 h-7 flex items-center justify-center rounded transition-colors relative',
+                      showComments ? 'bg-accent-light text-accent' : 'hover:bg-surface-raised text-muted hover:text-foreground'
+                    )}
+                    title="Toggle comments"
+                  >
+                    <MessageCircle size={13} />
+                    {unresolvedCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-warning text-[8px] font-bold text-white flex items-center justify-center">
+                        {unresolvedCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Tabs (only for editable files) */}
+              {isEditable(getFileExtension(selectedFile.title)) && !isEditing && (
+                <div className="flex items-center border-b border-border px-4">
+                  <button
+                    onClick={() => setActiveTab('preview')}
+                    className={cn(
+                      'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors',
+                      activeTab === 'preview' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
+                    )}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('edit')}
+                    className={cn(
+                      'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors',
+                      activeTab === 'edit' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
+                    )}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('comments')}
+                    className={cn(
+                      'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors flex items-center gap-1.5',
+                      activeTab === 'comments' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
+                    )}
+                  >
+                    <MessageCircle size={11} />
+                    Comments
+                    {unresolvedCount > 0 && (
+                      <span className="px-1 py-0.5 rounded-full bg-warning/20 text-warning text-[9px] font-medium">{unresolvedCount}</span>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Content area */}
+              <div className="flex">
+                {/* Main content */}
+                <div className={cn('flex-1 min-w-0', showComments ? 'border-r border-border' : '')}>
+                  {loadingFile ? (
+                    <div className="p-6 space-y-3 animate-pulse">
+                      <div className="h-5 bg-surface-raised rounded w-3/4" />
+                      <div className="h-3 bg-surface-raised rounded w-1/2" />
+                      <div className="h-3 bg-surface-raised rounded w-5/6" />
+                      <div className="h-3 bg-surface-raised rounded w-2/3" />
+                      <div className="h-3 bg-surface-raised rounded w-4/5" />
+                    </div>
+                  ) : isEditing ? (
+                    <FileEditor
+                      file={selectedFile}
+                      content={editedContent}
+                      onSave={handleSave}
+                      onCancel={() => setIsEditing(false)}
+                    />
+                  ) : fileContent ? (
+                    <div className="p-5 overflow-y-auto max-h-[65vh]">
+                      {activeTab === 'comments' ? (
+                        /* Comments view */
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-[13px] font-semibold text-foreground">
+                              Comments ({fileComments.length})
+                            </h3>
+                            {unresolvedCount > 0 && (
+                              <span className="text-[11px] text-warning">{unresolvedCount} unresolved</span>
+                            )}
+                          </div>
+                          {fileComments.length === 0 ? (
+                            <div className="text-center py-8">
+                              <MessageSquare size={24} className="mx-auto text-muted mb-2" />
+                              <p className="text-[12px] text-muted">No comments yet. Select a line in the file to add one.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {fileComments.map(comment => (
+                                <LineCommentThread
+                                  key={comment.id}
+                                  comment={comment}
+                                  onResolve={handleResolveComment}
+                                  onReply={handleReplyToComment}
+                                  onDelete={handleDeleteComment}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* Preview view */
+                        <div className="relative">
+                          {/* Line numbers with comment buttons */}
+                          <div className="flex">
+                            <div className="select-none text-right text-[11px] font-mono text-muted/30 leading-[22px] pr-3 shrink-0">
+                              {fileContent.split('\n').map((_, i) => (
+                                <div
+                                  key={i}
+                                  className="relative group cursor-pointer hover:text-accent transition-colors"
+                                  onClick={() => {
+                                    setNewCommentLine(i + 1)
+                                    setNewCommentText('')
+                                    setActiveTab('comments')
+                                  }}
+                                  title="Comment on this line"
+                                >
+                                  {i + 1}
+                                  <span className="absolute -left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <MessageSquarePlus size={10} className="text-accent" />
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              {getFileExtension(selectedFile.title) === 'md' ? (
+                                <MarkdownPreview content={fileContent} />
+                              ) : (
+                                <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">
+                                  {fileContent}
+                                </pre>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-40 text-muted p-6">
+                      <p className="text-[13px]">Select a resource to view its contents</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Comments sidebar */}
+                {showComments && !isEditing && activeTab !== 'comments' && (
+                  <div className="w-[320px] shrink-0 overflow-y-auto max-h-[65vh]">
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-[12px] font-semibold text-foreground flex items-center gap-1.5">
+                          <MessageCircle size={12} />
+                          Comments
+                        </h3>
+                        <span className="text-[10px] text-muted">
+                          {unresolvedCount > 0 ? `${unresolvedCount} open` : 'All resolved'}
+                        </span>
+                      </div>
+
+                      {fileComments.length === 0 ? (
+                        <div className="text-center py-6">
+                          <MessageSquare size={20} className="mx-auto text-muted mb-2" />
+                          <p className="text-[11px] text-muted">No comments yet</p>
+                          <p className="text-[10px] text-muted mt-1">Click a line number to add one</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {fileComments.slice(0, 10).map(comment => (
+                            <LineCommentThread
+                              key={comment.id}
+                              comment={comment}
+                              onResolve={handleResolveComment}
+                              onReply={handleReplyToComment}
+                              onDelete={handleDeleteComment}
+                            />
+                          ))}
+                          {fileComments.length > 10 && (
+                            <button
+                              onClick={() => setActiveTab('comments')}
+                              className="w-full text-center text-[11px] text-accent hover:underline py-2"
+                            >
+                              View all {fileComments.length} comments
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* File metadata footer */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-surface/30">
+                <div className="flex items-center gap-4 text-[10px] text-muted">
+                  <span className="flex items-center gap-1">
+                    <User size={10} />
+                    Uploaded by {selectedFile.uploadedBy}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Calendar size={10} />
+                    {formatDate(selectedFile.createdAt)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Edit3 size={10} />
+                    Last edited by {selectedFile.lastEditedBy}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Clock3 size={10} />
+                    {formatRelativeTime(selectedFile.updatedAt)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Hash size={10} />
+                    v{selectedFile.version}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedFile.tags.map(tag => (
+                    <span key={tag} className="px-1.5 py-0.5 rounded bg-surface-raised text-[9px] text-muted">
                       {tag}
                     </span>
                   ))}
                 </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleOpen(resource) }}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
-                  title="Open"
-                >
-                  <Eye size={14} />
-                </button>
-                <ChevronRight size={16} className="text-muted" />
-              </div>
             </div>
-          ))
+
+            {/* Edit history panel */}
+            {showHistory && (
+              <div className="mt-3 bg-base border border-border rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[13px] font-semibold text-foreground flex items-center gap-1.5">
+                    <History size={13} />
+                    Edit History
+                  </h3>
+                  <button
+                    onClick={() => setShowHistory(false)}
+                    className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-raised text-muted transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {selectedFile.editHistory.slice().reverse().map((entry, i) => (
+                    <div key={i} className="flex items-start gap-3 pb-2 border-b border-border last:border-0 last:pb-0">
+                      <div className="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-[10px] font-bold shrink-0">
+                        {entry.editedBy[0]}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-semibold text-foreground">{entry.editedBy}</span>
+                          <span className="text-[10px] text-muted">{formatRelativeTime(entry.editedAt)}</span>
+                          <span className="px-1 py-0.5 rounded bg-surface-raised text-[9px] text-muted font-mono">
+                            v{entry.version}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-foreground/70 mt-0.5">{entry.summary}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Document Viewer Modal */}
-      {selectedResource && (
-        <ResourceViewer
-          resource={selectedResource}
-          content={fileContent}
-          loading={loading}
-          error={error}
-          onClose={handleClose}
-        />
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowUploadModal(false)} />
+          <div className="relative w-full max-w-md bg-base border border-border rounded-xl shadow-2xl p-6 z-10 animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[16px] font-semibold text-foreground flex items-center gap-2">
+                <Upload size={16} />
+                Upload Resource
+              </h2>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* File picker */}
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-accent/50 transition-colors"
+              >
+                <FilePlus size={24} className="mx-auto text-muted mb-2" />
+                <p className="text-[12px] text-muted">Click to select a file</p>
+                <p className="text-[10px] text-muted mt-1">or drag and drop</p>
+                <input ref={fileInputRef} type="file" className="hidden" />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-foreground mb-1">Title</label>
+                <input
+                  type="text"
+                  value={uploadData.title}
+                  onChange={e => setUploadData(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="e.g. Q3 Marketing Plan.pdf"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-foreground mb-1">Description</label>
+                <textarea
+                  value={uploadData.description}
+                  onChange={e => setUploadData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Brief description of this resource..."
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-foreground mb-1">Tags (comma separated)</label>
+                <input
+                  type="text"
+                  value={uploadData.tags}
+                  onChange={e => setUploadData(prev => ({ ...prev, tags: e.target.value }))}
+                  placeholder="e.g. Marketing, Q3, Reports"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <Button variant="secondary" size="sm" onClick={() => setShowUploadModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" onClick={handleUpload} disabled={!uploadData.title}>
+                <Upload size={14} />
+                Upload
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
