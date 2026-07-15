@@ -1,15 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useAppState } from '@/lib/store'
-import { Card, CardHeader, CardTitle, Badge, Button } from '@/components/ui'
+import { useState, useCallback, useMemo } from 'react'
+import { Card } from '@/components/ui'
 import { formatRelativeTime, cn } from '@/lib/utils'
 import {
-  FolderOpen, Search, FileText, Download, ExternalLink,
-  Trash2, Filter, Clock, User, BookOpen, FileSpreadsheet,
-  Image, Code, X, Eye, ChevronRight, Target, ListChecks,
-  MessageSquare, Cpu, Globe
+  FolderOpen, Search, FileText, FileSpreadsheet,
+  Image, Code, X, Eye, ChevronRight, Target, BookOpen,
+  Archive, Link as LinkIcon, AlertCircle, Download,
+  ExternalLink, Clock, Tag, Type, List, CheckSquare,
+  Terminal, Table as TableIcon, Quote, Hash, Bold,
+  Italic, Code2, ListOrdered, Minus, ChevronDown
 } from 'lucide-react'
+
+// ─── Types ───────────────────────────────────────────────────────────
 
 interface Resource {
   id: string
@@ -23,10 +26,514 @@ interface Resource {
   url?: string
 }
 
+// ─── Markdown Renderer ───────────────────────────────────────────────
+
+interface MarkdownToken {
+  type: 'h1' | 'h2' | 'h3' | 'h4' | 'p' | 'li' | 'ol' | 'code' | 'codeblock'
+    | 'hr' | 'blockquote' | 'table' | 'empty' | 'html'
+  content: string
+  lang?: string
+  rows?: string[][]
+}
+
+function tokenizeMarkdown(text: string): MarkdownToken[] {
+  const lines = text.split('\n')
+  const tokens: MarkdownToken[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Code block (```)
+    if (line.trimStart().startsWith('```')) {
+      const lang = line.trimStart().slice(3).trim()
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      tokens.push({ type: 'codeblock', content: codeLines.join('\n'), lang: lang || undefined })
+      i++ // skip closing ```
+      continue
+    }
+
+    // HTML comment or tag
+    if (line.trimStart().startsWith('<!--') || line.trimStart().startsWith('<')) {
+      tokens.push({ type: 'html', content: line })
+      i++
+      continue
+    }
+
+    // Headings
+    const hMatch = line.match(/^(#{1,4})\s+(.+)$/)
+    if (hMatch) {
+      const level = hMatch[1].length as 1 | 2 | 3 | 4
+      const typeMap = { 1: 'h1' as const, 2: 'h2' as const, 3: 'h3' as const, 4: 'h4' as const }
+      tokens.push({ type: typeMap[level], content: hMatch[2] })
+      i++
+      continue
+    }
+
+    // Horizontal rule
+    if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) {
+      tokens.push({ type: 'hr', content: '' })
+      i++
+      continue
+    }
+
+    // Blockquote
+    if (line.trimStart().startsWith('> ')) {
+      const quoteLines: string[] = []
+      while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
+        quoteLines.push(lines[i].trimStart().slice(2))
+        i++
+      }
+      tokens.push({ type: 'blockquote', content: quoteLines.join('\n') })
+      continue
+    }
+
+    // Table
+    if (line.includes('|') && line.trimStart().startsWith('|')) {
+      const tableRows: string[][] = []
+      while (i < lines.length && lines[i].includes('|')) {
+        const cells = lines[i].split('|').filter(c => c.trim()).map(c => c.trim())
+        // Skip separator rows (| --- | --- |)
+        if (!cells.every(c => /^[-:]+$/.test(c.replace(/\s/g, '')))) {
+          tableRows.push(cells)
+        }
+        i++
+      }
+      if (tableRows.length > 0) {
+        tokens.push({ type: 'table', content: '', rows: tableRows })
+      }
+      continue
+    }
+
+    // Ordered list
+    if (/^\d+\.\s/.test(line.trimStart())) {
+      const listLines: string[] = []
+      while (i < lines.length && /^\d+\.\s/.test(lines[i].trimStart())) {
+        listLines.push(lines[i].trimStart().replace(/^\d+\.\s/, ''))
+        i++
+      }
+      tokens.push({ type: 'ol', content: listLines.join('\n') })
+      continue
+    }
+
+    // Unordered list
+    if (/^[-*+]\s/.test(line.trimStart())) {
+      const listLines: string[] = []
+      while (i < lines.length && /^[-*+]\s/.test(lines[i].trimStart())) {
+        listLines.push(lines[i].trimStart().replace(/^[-*+]\s/, ''))
+        i++
+      }
+      tokens.push({ type: 'li', content: listLines.join('\n') })
+      continue
+    }
+
+    // Empty line
+    if (line.trim() === '') {
+      tokens.push({ type: 'empty', content: '' })
+      i++
+      continue
+    }
+
+    // Paragraph
+    tokens.push({ type: 'p', content: line })
+    i++
+  }
+
+  return tokens
+}
+
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  // Process inline formatting: **bold**, *italic*, `code`, [link](url)
+  const parts: React.ReactNode[] = []
+  let remaining = text
+  let key = 0
+
+  while (remaining.length > 0) {
+    // Bold: **text**
+    const boldMatch = remaining.match(/^\*\*(.+?)\*\*/)
+    if (boldMatch) {
+      parts.push(<strong key={key++} className="font-semibold">{boldMatch[1]}</strong>)
+      remaining = remaining.slice(boldMatch[0].length)
+      continue
+    }
+
+    // Italic: *text*
+    const italicMatch = remaining.match(/^\*(.+?)\*/)
+    if (italicMatch) {
+      parts.push(<em key={key++} className="italic">{italicMatch[1]}</em>)
+      remaining = remaining.slice(italicMatch[0].length)
+      continue
+    }
+
+    // Inline code: `code`
+    const codeMatch = remaining.match(/^`(.+?)`/)
+    if (codeMatch) {
+      parts.push(
+        <code key={key++} className="px-1.5 py-0.5 rounded bg-surface-raised text-[12px] font-mono text-accent">
+          {codeMatch[1]}
+        </code>
+      )
+      remaining = remaining.slice(codeMatch[0].length)
+      continue
+    }
+
+    // Link: [text](url)
+    const linkMatch = remaining.match(/^\[(.+?)\]\((.+?)\)/)
+    if (linkMatch) {
+      parts.push(
+        <a key={key++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+           className="text-accent hover:underline">
+          {linkMatch[1]}
+          <ExternalLink size={10} className="inline ml-0.5" />
+        </a>
+      )
+      remaining = remaining.slice(linkMatch[0].length)
+      continue
+    }
+
+    // Regular text up to next special char
+    const nextSpecial = remaining.search(/[*`\[]/)
+    if (nextSpecial === 0) {
+      // Shouldn't happen, but safety
+      parts.push(remaining[0])
+      remaining = remaining.slice(1)
+    } else if (nextSpecial > 0) {
+      parts.push(remaining.slice(0, nextSpecial))
+      remaining = remaining.slice(nextSpecial)
+    } else {
+      parts.push(remaining)
+      remaining = ''
+    }
+  }
+
+  return parts
+}
+
+function MarkdownRenderer({ content }: { content: string }) {
+  const tokens = useMemo(() => tokenizeMarkdown(content), [content])
+
+  return (
+    <div className="space-y-3">
+      {tokens.map((token, i) => {
+        switch (token.type) {
+          case 'h1':
+            return (
+              <h1 key={i} className="text-[22px] font-bold text-foreground mt-8 mb-3 pb-2 border-b border-border">
+                {renderInlineMarkdown(token.content)}
+              </h1>
+            )
+          case 'h2':
+            return (
+              <h2 key={i} className="text-[17px] font-semibold text-foreground mt-6 mb-2">
+                {renderInlineMarkdown(token.content)}
+              </h2>
+            )
+          case 'h3':
+            return (
+              <h3 key={i} className="text-[14px] font-semibold text-foreground mt-5 mb-1.5">
+                {renderInlineMarkdown(token.content)}
+              </h3>
+            )
+          case 'h4':
+            return (
+              <h4 key={i} className="text-[13px] font-semibold text-foreground mt-4 mb-1">
+                {renderInlineMarkdown(token.content)}
+              </h4>
+            )
+          case 'p':
+            return (
+              <p key={i} className="text-[13px] text-foreground leading-[1.7]">
+                {renderInlineMarkdown(token.content)}
+              </p>
+            )
+          case 'li': {
+            const items = token.content.split('\n')
+            return (
+              <ul key={i} className="space-y-1 ml-4">
+                {items.map((item, j) => (
+                  <li key={j} className="text-[13px] text-foreground leading-relaxed flex items-start gap-2">
+                    <span className="text-muted mt-1.5 shrink-0 w-1.5 h-1.5 rounded-full bg-muted" />
+                    <span>{renderInlineMarkdown(item)}</span>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+          case 'ol': {
+            const items = token.content.split('\n')
+            return (
+              <ol key={i} className="space-y-1 ml-4 list-decimal">
+                {items.map((item, j) => (
+                  <li key={j} className="text-[13px] text-foreground leading-relaxed pl-1">
+                    {renderInlineMarkdown(item)}
+                  </li>
+                ))}
+              </ol>
+            )
+          }
+          case 'codeblock':
+            return (
+              <div key={i} className="relative group">
+                {token.lang && (
+                  <div className="absolute top-0 right-0 px-3 py-1 text-[10px] font-mono text-muted bg-surface-raised rounded-bl-lg rounded-tr-lg border-l border-b border-border">
+                    {token.lang}
+                  </div>
+                )}
+                <pre className="bg-surface-raised border border-border rounded-lg p-4 overflow-x-auto text-[12px] font-mono leading-[1.6] text-foreground">
+                  <code>{token.content}</code>
+                </pre>
+              </div>
+            )
+          case 'hr':
+            return <hr key={i} className="my-6 border-border" />
+          case 'blockquote':
+            return (
+              <blockquote key={i} className="border-l-3 border-accent pl-4 py-1 bg-accent-light/30 rounded-r-lg">
+                <div className="text-[13px] text-foreground leading-relaxed">
+                  {token.content.split('\n').map((line, j) => (
+                    <p key={j}>{renderInlineMarkdown(line)}</p>
+                  ))}
+                </div>
+              </blockquote>
+            )
+          case 'table': {
+            if (!token.rows || token.rows.length === 0) return null
+            const [header, ...body] = token.rows
+            return (
+              <div key={i} className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="bg-surface-raised">
+                      {header.map((cell, j) => (
+                        <th key={j} className="px-3 py-2 text-left font-semibold text-foreground border-r border-border last:border-r-0">
+                          {renderInlineMarkdown(cell)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {body.map((row, j) => (
+                      <tr key={j} className="border-t border-border hover:bg-surface-raised/50">
+                        {row.map((cell, k) => (
+                          <td key={k} className="px-3 py-2 text-foreground border-r border-border last:border-r-0">
+                            {renderInlineMarkdown(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
+          case 'empty':
+            return <div key={i} className="h-3" />
+          case 'html':
+            return null // skip HTML comments
+          default:
+            return null
+        }
+      })}
+    </div>
+  )
+}
+
+// ─── Syntax Highlighting for Code Files ──────────────────────────────
+
+function CodeRenderer({ content, language }: { content: string; language?: string }) {
+  return (
+    <div className="relative">
+      {language && (
+        <div className="sticky top-0 px-4 py-2 text-[11px] font-mono text-muted bg-surface-raised border-b border-border flex items-center gap-2">
+          <Code2 size={14} />
+          {language}
+        </div>
+      )}
+      <pre className="p-4 overflow-x-auto text-[12px] font-mono leading-[1.6] text-foreground">
+        <code>{content}</code>
+      </pre>
+    </div>
+  )
+}
+
+// ─── Resource Viewer ─────────────────────────────────────────────────
+
+function getFileExtension(url: string): string {
+  const match = url.match(/\.([a-z0-9]+)(?:\?.*)?$/i)
+  return match ? match[1].toLowerCase() : ''
+}
+
+function isCodeFile(ext: string): boolean {
+  return ['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'rb', 'java', 'c', 'cpp', 'h', 'hpp',
+    'css', 'scss', 'less', 'json', 'yaml', 'yml', 'xml', 'sql', 'sh', 'bash', 'zsh',
+    'md', 'mdx', 'txt', 'env', 'toml', 'ini', 'cfg', 'conf'].includes(ext)
+}
+
+function isImageFile(ext: string): boolean {
+  return ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(ext)
+}
+
+function isMarkdownFile(ext: string, title: string): boolean {
+  return ext === 'md' || ext === 'mdx' || title.endsWith('.md') || title.endsWith('.mdx')
+}
+
+function ResourceViewer({
+  resource,
+  content,
+  loading,
+  error,
+  onClose
+}: {
+  resource: Resource
+  content: string | null
+  loading: boolean
+  error: boolean
+  onClose: () => void
+}) {
+  const ext = resource.url ? getFileExtension(resource.url) : ''
+  const isMd = isMarkdownFile(ext, resource.title)
+  const isCode = isCodeFile(ext) && !isMd
+  const isImg = isImageFile(ext)
+
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="space-y-4 animate-pulse p-6">
+          <div className="h-6 bg-surface-raised rounded w-3/4" />
+          <div className="h-4 bg-surface-raised rounded w-1/2" />
+          <div className="h-4 bg-surface-raised rounded w-5/6" />
+          <div className="h-4 bg-surface-raised rounded w-2/3" />
+          <div className="h-4 bg-surface-raised rounded w-4/5" />
+          <div className="h-4 bg-surface-raised rounded w-3/4" />
+        </div>
+      )
+    }
+
+    if (error) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64 text-muted gap-3">
+          <AlertCircle size={32} className="text-warning" />
+          <p className="text-[13px]">Failed to load document content.</p>
+          <p className="text-[11px]">The file may not exist or there was a network error.</p>
+        </div>
+      )
+    }
+
+    if (!content) {
+      return (
+        <div className="flex flex-col items-center justify-center h-40 text-muted gap-2">
+          <FileText size={28} />
+          <p className="text-[13px]">No content available for this resource.</p>
+        </div>
+      )
+    }
+
+    if (isMd) {
+      return (
+        <div className="p-6">
+          <MarkdownRenderer content={content} />
+        </div>
+      )
+    }
+
+    if (isCode) {
+      return <CodeRenderer content={content} language={ext} />
+    }
+
+    if (isImg) {
+      return (
+        <div className="flex items-center justify-center p-6">
+          <img
+            src={resource.url}
+            alt={resource.title}
+            className="max-w-full max-h-[70vh] rounded-lg object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        </div>
+      )
+    }
+
+    // Plain text fallback
+    return (
+      <pre className="p-6 text-[13px] font-mono leading-relaxed text-foreground whitespace-pre-wrap">
+        {content}
+      </pre>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 pb-8 px-4">
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-4xl max-h-[85vh] bg-base border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col z-10 animate-fade-in">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={cn(
+              'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
+              typeColors[resource.type] || 'bg-surface-raised text-muted'
+            )}>
+              {typeIcons[resource.type] || <FileText size={16} />}
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-[15px] font-semibold text-foreground truncate">{resource.title}</h2>
+              <div className="flex items-center gap-2 text-[11px] text-muted">
+                <span>{resource.type}</span>
+                <span>·</span>
+                <span>{resource.size}</span>
+                <span>·</span>
+                <span>Updated {formatRelativeTime(resource.updatedAt)}</span>
+                {ext && (
+                  <>
+                    <span>·</span>
+                    <span className="font-mono">.{ext}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            {resource.url && (
+              <a
+                href={resource.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
+                title="Open in new tab"
+              >
+                <ExternalLink size={16} />
+              </a>
+            )}
+            <button
+              onClick={onClose}
+              className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          {renderContent()}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Icons & Colors ──────────────────────────────────────────────────
+
 const typeIcons: Record<string, React.ReactNode> = {
   Document: <FileText size={16} />,
   Spreadsheet: <FileSpreadsheet size={16} />,
-  Archive: <FolderOpen size={16} />,
+  Archive: <Archive size={16} />,
   Image: <Image size={16} />,
   Code: <Code size={16} />,
   Plan: <Target size={16} />,
@@ -42,6 +549,8 @@ const typeColors: Record<string, string> = {
   Plan: 'bg-accent-light text-accent',
   Guide: 'bg-purple/10 text-purple',
 }
+
+// ─── Mock Resources ──────────────────────────────────────────────────
 
 const mockResources: Resource[] = [
   {
@@ -82,35 +591,63 @@ const mockResources: Resource[] = [
   },
 ]
 
+// ─── Page Component ──────────────────────────────────────────────────
+
 export default function ResourcesPage() {
   const [search, setSearch] = useState('')
   const [filterTag, setFilterTag] = useState<string | null>(null)
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null)
-  const [planContent, setPlanContent] = useState<string | null>(null)
-  const [loadingPlan, setLoadingPlan] = useState(false)
+  const [fileContent, setFileContent] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
 
-  const allTags = Array.from(new Set(mockResources.flatMap(r => r.tags)))
+  const allTags = useMemo(
+    () => Array.from(new Set(mockResources.flatMap(r => r.tags))),
+    []
+  )
 
-  const filtered = mockResources.filter(r => {
-    if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false
-    if (filterTag && !r.tags.includes(filterTag)) return false
-    return true
-  })
+  const filtered = useMemo(
+    () => mockResources.filter(r => {
+      if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false
+      if (filterTag && !r.tags.includes(filterTag)) return false
+      return true
+    }),
+    [search, filterTag]
+  )
 
-  const handleOpen = async (resource: Resource) => {
+  const handleOpen = useCallback(async (resource: Resource) => {
     setSelectedResource(resource)
+    setFileContent(null)
+    setError(false)
+
     if (resource.url) {
-      setLoadingPlan(true)
+      setLoading(true)
       try {
         const res = await fetch(resource.url)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const text = await res.text()
-        setPlanContent(text)
+
+        // Check if it's HTML (meaning the file wasn't found as static)
+        if (text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
+          setError(true)
+          setFileContent(null)
+        } else {
+          setFileContent(text)
+          setError(false)
+        }
       } catch (e) {
-        setPlanContent('Failed to load document content.')
+        setError(true)
+        setFileContent(null)
       }
-      setLoadingPlan(false)
+      setLoading(false)
     }
-  }
+  }, [])
+
+  const handleClose = useCallback(() => {
+    setSelectedResource(null)
+    setFileContent(null)
+    setError(false)
+  }, [])
 
   return (
     <div className="max-w-content mx-auto px-4 md:px-8 py-6 md:py-8">
@@ -166,7 +703,10 @@ export default function ResourcesPage() {
               className="bg-base border border-border rounded-[8px] p-4 flex items-center gap-4 hover:border-accent/30 transition-colors cursor-pointer"
               onClick={() => handleOpen(resource)}
             >
-              <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', typeColors[resource.type] || 'bg-surface-raised text-muted')}>
+              <div className={cn(
+                'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
+                typeColors[resource.type] || 'bg-surface-raised text-muted'
+              )}>
                 {typeIcons[resource.type] || <FileText size={16} />}
               </div>
               <div className="min-w-0 flex-1">
@@ -204,64 +744,13 @@ export default function ResourcesPage() {
 
       {/* Document Viewer Modal */}
       {selectedResource && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 pb-8 px-4">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setSelectedResource(null); setPlanContent(null) }} />
-          <div className="relative w-full max-w-4xl max-h-[85vh] bg-base border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col z-10 animate-fade-in">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', typeColors[selectedResource.type] || 'bg-surface-raised text-muted')}>
-                  {typeIcons[selectedResource.type] || <FileText size={16} />}
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-[16px] font-semibold text-foreground truncate">{selectedResource.title}</h2>
-                  <p className="text-[11px] text-muted">{selectedResource.type} · {selectedResource.size} · Updated {formatRelativeTime(selectedResource.updatedAt)}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => { setSelectedResource(null); setPlanContent(null) }}
-                className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-surface-raised text-muted hover:text-foreground transition-colors shrink-0"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {loadingPlan ? (
-                <div className="space-y-4 animate-pulse">
-                  <div className="h-6 bg-surface-raised rounded w-3/4" />
-                  <div className="h-4 bg-surface-raised rounded w-1/2" />
-                  <div className="h-4 bg-surface-raised rounded w-5/6" />
-                  <div className="h-4 bg-surface-raised rounded w-2/3" />
-                  <div className="h-4 bg-surface-raised rounded w-4/5" />
-                  <div className="h-4 bg-surface-raised rounded w-3/4" />
-                </div>
-              ) : planContent ? (
-                <div className="prose prose-sm max-w-none text-foreground">
-                  {planContent.split('\n').map((line, i) => {
-                    if (line.startsWith('# ')) return <h1 key={i} className="text-[24px] font-bold text-foreground mt-6 mb-2">{line.slice(2)}</h1>
-                    if (line.startsWith('## ')) return <h2 key={i} className="text-[18px] font-semibold text-foreground mt-5 mb-2">{line.slice(3)}</h2>
-                    if (line.startsWith('### ')) return <h3 key={i} className="text-[15px] font-semibold text-foreground mt-4 mb-1">{line.slice(4)}</h3>
-                    if (line.startsWith('---')) return <hr key={i} className="my-6 border-border" />
-                    if (line.startsWith('- ')) return <li key={i} className="text-[13px] text-foreground ml-4 list-disc">{line.slice(2)}</li>
-                    if (line.startsWith('| ')) return <p key={i} className="text-[12px] font-mono text-muted">{line}</p>
-                    if (line.startsWith('**')) {
-                      const bold = line.replace(/\*\*/g, '')
-                      return <p key={i} className="text-[13px] font-semibold text-foreground mt-2">{bold}</p>
-                    }
-                    if (line.trim() === '') return <div key={i} className="h-2" />
-                    return <p key={i} className="text-[13px] text-foreground leading-relaxed">{line}</p>
-                  })}
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-40 text-muted">
-                  <p>Select a resource to view its contents</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <ResourceViewer
+          resource={selectedResource}
+          content={fileContent}
+          loading={loading}
+          error={error}
+          onClose={handleClose}
+        />
       )}
     </div>
   )
