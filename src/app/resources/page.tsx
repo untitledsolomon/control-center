@@ -2,24 +2,19 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAppState } from '@/lib/store'
-import { Card, CardHeader, CardTitle, Badge, Button } from '@/components/ui'
+import { Card, Button } from '@/components/ui'
 import { formatRelativeTime, cn } from '@/lib/utils'
 import {
-  FolderOpen, Search, FileText, Download, ExternalLink,
-  Trash2, Filter, Clock, User, BookOpen, FileSpreadsheet,
-  Image, Code, X, Eye, ChevronRight, Target, ListChecks,
-  MessageSquare, Cpu, Globe, Upload, Edit3, Save, Plus,
-  MessageCircle, Reply, MoreHorizontal, Check, AlertCircle,
-  History, Hash, Calendar, FileEdit, FileCode, FileImage,
-  FileArchive, Link, AtSign, CornerDownRight, Pin, Clock3,
-  ArrowLeft, Bold, Italic, List, Heading1, Heading2, Heading3,
-  Quote, Code2, Link2, ImageIcon, Table2, Minus, Undo2, Redo2,
-  Maximize2, Minimize2, FilePlus, FileUp, FileDown, GripVertical,
-  PanelRightOpen, PanelRightClose, SplitSquareHorizontal,
-  MessageSquarePlus, CheckCheck, Loader2, AlertTriangle
+  FolderOpen, Search, FileText, FileSpreadsheet,
+  Image, Code, X, ChevronRight, Target, BookOpen,
+  MessageSquare, Upload, Edit3, Save, Plus,
+  MessageCircle, Reply, Check,
+  History, Hash, Calendar, FileEdit, Clock3,
+  ArrowLeft, Maximize2, Minimize2, FilePlus,
+  MessageSquarePlus, Eye, FileCode
 } from 'lucide-react'
 
-// ─── Types ──────────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 interface ResourceFile {
   id: string
@@ -71,7 +66,7 @@ interface LineCommentReply {
   createdAt: Date
 }
 
-// ─── Mock Data ──────────────────────────────────────────────────────
+// ─── Mock Data ──────────────────────────────────────────────────────────────
 
 const MOCK_FILES: ResourceFile[] = [
   {
@@ -200,7 +195,7 @@ const MOCK_FILES: ResourceFile[] = [
   },
 ]
 
-// ─── Mock Comments ──────────────────────────────────────────────────
+// ─── Mock Comments ──────────────────────────────────────────────────────────
 
 const MOCK_COMMENTS: LineComment[] = [
   {
@@ -213,12 +208,12 @@ const MOCK_COMMENTS: LineComment[] = [
     replies: [
       {
         id: 'c1r1', author: 'DAWN', authorRole: 'dawn',
-        body: 'Good idea. I\'ll add "What CRM/ERP are you currently using?" as a follow-up.',
+        body: "Good idea. I'll add \"What CRM/ERP are you currently using?\" as a follow-up.",
         createdAt: new Date(Date.now() - 2.5 * 86400000),
       },
       {
         id: 'c1r2', author: 'Solomon', authorRole: 'solomon',
-        body: 'Perfect, that\'s exactly what I was thinking.',
+        body: "Perfect, that's exactly what I was thinking.",
         createdAt: new Date(Date.now() - 2 * 86400000),
       },
     ]
@@ -249,7 +244,7 @@ const MOCK_COMMENTS: LineComment[] = [
   },
 ]
 
-// ─── Helpers ────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 const typeIcons: Record<string, React.ReactNode> = {
   Document: <FileText size={16} />,
@@ -313,7 +308,7 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 10)
 }
 
-// ─── Markdown Renderer ──────────────────────────────────────────────
+// ─── Markdown Renderer ──────────────────────────────────────────────────────
 
 function renderMarkdownLine(line: string, index: number): { html: string; key: number; isCodeBlock?: boolean } {
   // Headings
@@ -372,7 +367,7 @@ function renderMarkdownLine(line: string, index: number): { html: string; key: n
   return { html: `<p class="text-[13px] text-foreground leading-relaxed">${html}</p>`, key: index }
 }
 
-// ─── Line Comment Thread Component ──────────────────────────────────
+// ─── Line Comment Thread Component ──────────────────────────────────────────
 
 function LineCommentThread({
   comment,
@@ -515,7 +510,7 @@ function LineCommentThread({
   )
 }
 
-// ─── File Editor Component ──────────────────────────────────────────
+// ─── File Editor Component ──────────────────────────────────────────────────
 
 function FileEditor({
   file,
@@ -532,6 +527,11 @@ function FileEditor({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const ext = getFileExtension(file.title)
+
+  // Sync when content prop changes
+  useEffect(() => {
+    setEditedContent(content)
+  }, [content])
 
   // Auto-focus
   useEffect(() => {
@@ -635,7 +635,7 @@ function FileEditor({
   )
 }
 
-// ─── Markdown Preview Component ─────────────────────────────────────
+// ─── Markdown Preview Component ─────────────────────────────────────────────
 
 function MarkdownPreview({ content }: { content: string }) {
   const lines = content.split('\n')
@@ -711,7 +711,7 @@ function MarkdownPreview({ content }: { content: string }) {
   )
 }
 
-// ─── File Viewer Modal ──────────────────────────────────────────────
+// ─── File Viewer Modal ──────────────────────────────────────────────────────
 
 function FileViewerModal({
   file,
@@ -737,6 +737,10 @@ function FileViewerModal({
   onReplyToComment,
   onDeleteComment,
   onNewCommentLine,
+  newCommentLine,
+  newCommentText,
+  onNewCommentTextChange,
+  onSubmitComment,
 }: {
   file: ResourceFile
   fileContent: string | null
@@ -761,9 +765,23 @@ function FileViewerModal({
   onReplyToComment: (id: string, body: string) => void
   onDeleteComment: (id: string) => void
   onNewCommentLine: (line: number | null) => void
+  newCommentLine: number | null
+  newCommentText: string
+  onNewCommentTextChange: (text: string) => void
+  onSubmitComment: () => void
 }) {
   const ext = getFileExtension(file.title)
   const editable = isEditable(ext)
+  const isMd = ext === 'md'
+  const [viewMode, setViewMode] = useState<'read' | 'code'>('read')
+  const commentInputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Focus comment input when a line is selected
+  useEffect(() => {
+    if (newCommentLine && commentInputRef.current) {
+      commentInputRef.current.focus()
+    }
+  }, [newCommentLine])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
@@ -908,7 +926,7 @@ function FileViewerModal({
             ) : fileContent ? (
               <div className="p-5">
                 {activeTab === 'comments' ? (
-                  /* Comments full view */
+                  /* ── Comments full view ── */
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-[13px] font-semibold text-foreground">
@@ -938,9 +956,36 @@ function FileViewerModal({
                     )}
                   </div>
                 ) : (
-                  /* Preview view with line numbers */
+                  /* ── Preview / Code view ── */
                   <div className="relative">
+                    {/* Read/Code toggle for markdown files */}
+                    {isMd && (
+                      <div className="flex items-center gap-1 mb-3 border-b border-border pb-2">
+                        <button
+                          onClick={() => setViewMode('read')}
+                          className={cn(
+                            'px-2.5 py-1 text-[11px] font-medium rounded transition-colors flex items-center gap-1.5',
+                            viewMode === 'read' ? 'bg-accent-light text-accent' : 'text-muted hover:text-foreground'
+                          )}
+                        >
+                          <Eye size={12} />
+                          Read
+                        </button>
+                        <button
+                          onClick={() => setViewMode('code')}
+                          className={cn(
+                            'px-2.5 py-1 text-[11px] font-medium rounded transition-colors flex items-center gap-1.5',
+                            viewMode === 'code' ? 'bg-accent-light text-accent' : 'text-muted hover:text-foreground'
+                          )}
+                        >
+                          <FileCode size={12} />
+                          Code
+                        </button>
+                      </div>
+                    )}
+
                     <div className="flex">
+                      {/* Line numbers (clickable for comments) */}
                       <div className="select-none text-right text-[11px] font-mono text-muted/30 leading-[22px] pr-3 shrink-0">
                         {fileContent.split('\n').map((_, i) => (
                           <div
@@ -948,7 +993,7 @@ function FileViewerModal({
                             className="relative group cursor-pointer hover:text-accent transition-colors"
                             onClick={() => {
                               onNewCommentLine(i + 1)
-                              onSetActiveTab('comments')
+                              onSetActiveTab('preview')
                             }}
                             title="Comment on this line"
                           >
@@ -959,8 +1004,10 @@ function FileViewerModal({
                           </div>
                         ))}
                       </div>
+
+                      {/* Content */}
                       <div className="flex-1 min-w-0">
-                        {ext === 'md' ? (
+                        {isMd && viewMode === 'read' ? (
                           <MarkdownPreview content={fileContent} />
                         ) : (
                           <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">
@@ -969,6 +1016,58 @@ function FileViewerModal({
                         )}
                       </div>
                     </div>
+
+                    {/* ── Inline comment input bar ── */}
+                    {newCommentLine && (
+                      <div className="mt-3 pt-3 border-t border-border">
+                        <div className="flex items-start gap-2">
+                          <div className="flex items-center gap-1.5 shrink-0 mt-1.5">
+                            <span className="w-5 h-5 rounded-full bg-accent text-white flex items-center justify-center text-[10px] font-bold">
+                              S
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[11px] font-semibold text-foreground">Comment on line {newCommentLine}</span>
+                              <button
+                                onClick={() => onNewCommentLine(null)}
+                                className="text-[10px] text-muted hover:text-foreground transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                            <textarea
+                              ref={commentInputRef}
+                              value={newCommentText}
+                              onChange={e => onNewCommentTextChange(e.target.value)}
+                              placeholder="Write a comment..."
+                              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-[12px] text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-none min-h-[60px]"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault()
+                                  onSubmitComment()
+                                }
+                              }}
+                            />
+                            <div className="flex items-center justify-end gap-1.5 mt-1.5">
+                              <button
+                                onClick={() => onNewCommentLine(null)}
+                                className="px-2 py-1 text-[10px] text-muted hover:text-foreground transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={onSubmitComment}
+                                disabled={!newCommentText.trim()}
+                                className="px-3 py-1 text-[10px] font-medium bg-accent text-white rounded hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Comment
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -979,7 +1078,7 @@ function FileViewerModal({
             )}
           </div>
 
-          {/* Comments sidebar (320px, slide-in from right) */}
+          {/* Comments sidebar (320px) */}
           {showComments && !isEditing && activeTab !== 'comments' && (
             <div className="w-[320px] shrink-0 overflow-y-auto bg-surface/30">
               <div className="p-4">
@@ -1058,7 +1157,7 @@ function FileViewerModal({
           </div>
         </div>
 
-        {/* Edit history panel (inside modal, below content) */}
+        {/* Edit history panel */}
         {showHistory && (
           <div className="border-t border-border p-4 bg-surface/20 shrink-0 max-h-[200px] overflow-y-auto">
             <div className="flex items-center justify-between mb-3">
@@ -1099,7 +1198,7 @@ function FileViewerModal({
   )
 }
 
-// ─── Main Page Component ────────────────────────────────────────────
+// ─── Main Page Component ────────────────────────────────────────────────────
 
 export default function ResourcesPage() {
   const { state, addNotification, addActivity } = useAppState()
@@ -1135,13 +1234,14 @@ export default function ResourcesPage() {
     setActiveTab('preview')
     setIsEditing(false)
     setShowHistory(false)
+    setNewCommentLine(null)
+    setNewCommentText('')
 
     if (file.path) {
       setLoadingFile(true)
       try {
         const res = await fetch(file.path)
         const text = await res.text()
-        // Check if we got HTML (file not found, returned page)
         if (text.trim().startsWith('<!') || text.trim().startsWith('<html')) {
           setFileContent(file.content || '// File content not available for preview')
         } else {
@@ -1163,7 +1263,7 @@ export default function ResourcesPage() {
     if (!selectedFile) return
     setFileContent(newContent)
     setIsEditing(false)
-    // Update the file in mock data
+    setActiveTab('preview')
     const idx = MOCK_FILES.findIndex(f => f.id === selectedFile.id)
     if (idx !== -1) {
       MOCK_FILES[idx] = {
@@ -1183,13 +1283,13 @@ export default function ResourcesPage() {
     addActivity({ badge: 'TASK_COMPLETE', title: 'File edited', description: `${selectedFile.title} updated to v${MOCK_FILES[idx]?.version || '?'}` })
   }, [selectedFile, addNotification, addActivity])
 
-  // Add comment
-  const handleAddComment = useCallback((lineNumber: number) => {
-    if (!selectedFile || !newCommentText.trim()) return
+  // Submit comment (called from the inline input bar)
+  const handleSubmitComment = useCallback(() => {
+    if (!selectedFile || !newCommentText.trim() || !newCommentLine) return
     const comment: LineComment = {
       id: generateId(),
       fileId: selectedFile.id,
-      lineNumber,
+      lineNumber: newCommentLine,
       author: 'Solomon',
       authorRole: 'solomon',
       body: newCommentText.trim(),
@@ -1201,8 +1301,8 @@ export default function ResourcesPage() {
     setComments(prev => [comment, ...prev])
     setNewCommentText('')
     setNewCommentLine(null)
-    addNotification({ type: 'update', icon: 'MessageSquare', title: 'Comment added', description: `Line ${lineNumber}: ${comment.body.slice(0, 60)}...`, timestamp: new Date(), screen: '/resources' })
-  }, [selectedFile, newCommentText, addNotification])
+    addNotification({ type: 'update', icon: 'MessageSquare', title: 'Comment added', description: `Line ${newCommentLine}: ${comment.body.slice(0, 60)}...`, timestamp: new Date(), screen: '/resources' })
+  }, [selectedFile, newCommentText, newCommentLine, addNotification])
 
   // Resolve comment
   const handleResolveComment = useCallback((commentId: string) => {
@@ -1308,7 +1408,7 @@ export default function ResourcesPage() {
         </div>
       </div>
 
-      {/* File list (full width when no file selected) */}
+      {/* File list */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
           <Card className="p-8 text-center">
@@ -1394,18 +1494,22 @@ export default function ResourcesPage() {
           activeTab={activeTab}
           unresolvedCount={unresolvedCount}
           fileComments={fileComments}
-          onClose={() => { setSelectedFile(null); setFileContent(null); setIsEditing(false) }}
+          onClose={() => { setSelectedFile(null); setFileContent(null); setIsEditing(false); setNewCommentLine(null) }}
           onStartEdit={() => { setIsEditing(true); setEditedContent(fileContent || ''); setActiveTab('edit') }}
           onSave={handleSave}
-          onCancelEdit={() => setIsEditing(false)}
+          onCancelEdit={() => { setIsEditing(false); setActiveTab('preview') }}
           onToggleComments={() => setShowComments(!showComments)}
           onToggleHistory={() => setShowHistory(!showHistory)}
           onSetActiveTab={setActiveTab}
-          onAddComment={handleAddComment}
+          onAddComment={handleSubmitComment}
           onResolveComment={handleResolveComment}
           onReplyToComment={handleReplyToComment}
           onDeleteComment={handleDeleteComment}
           onNewCommentLine={setNewCommentLine}
+          newCommentLine={newCommentLine}
+          newCommentText={newCommentText}
+          onNewCommentTextChange={setNewCommentText}
+          onSubmitComment={handleSubmitComment}
         />
       )}
 
@@ -1428,7 +1532,6 @@ export default function ResourcesPage() {
             </div>
 
             <div className="space-y-3">
-              {/* File picker */}
               <div
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-accent/50 transition-colors"
