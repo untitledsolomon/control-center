@@ -597,3 +597,17 @@ export async function getAgentStatus(): Promise<{ status: string; uptime: number
     return { status: 'active', uptime: 99.8, memory: 42, cpu: 18 }
   }
 }
+
+// ─── Backward-compatible aliases (for old Jarvis Mission Control pages) ─────
+
+/** @deprecated Use fetchActivityLogs instead */
+export const fetchActivityLog = fetchActivityLogs;
+
+/** @deprecated Use fetchWeeklyActivity instead */
+export const fetchWeeklyChartData = fetchWeeklyActivity;
+
+/** @deprecated Use fetchHourlyActivity instead */
+export const fetchHourlyChartData = fetchHourlyActivity;
+
+/** @deprecated Use getAgentStatus instead */
+export const fetchAgentStatus = getAgentStatus;
