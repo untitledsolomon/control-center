@@ -1,17 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { getGreeting, getStatusConfig, formatRelativeTime, cn } from '@/lib/utils'
-import { useAppState, weeklyData, hourlyData } from '@/lib/store'
+import { useAppState, weeklyData as mockWeekly, hourlyData as mockHourly } from '@/lib/store'
 import { Card, CardHeader, CardTitle, Badge, Button } from '@/components/ui'
 import {
   CheckCircle, FileText, Users, AlertTriangle, Activity,
-  Target, RefreshCw, ChevronRight, Clock
+  Target, RefreshCw, ChevronRight, Clock, Bot, Cpu, HardDrive
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area
 } from 'recharts'
+import { fetchDashboardStats, fetchActivityLog, fetchWeeklyChartData, fetchHourlyChartData, fetchAgentStatus } from '@/lib/api-client'
 
 const iconMap: Record<string, React.ReactNode> = {
   CheckCircle: <CheckCircle size={18} />,
@@ -34,6 +35,62 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState(new Date())
+  const [weeklyData, setWeeklyData] = useState(mockWeekly)
+  const [hourlyData, setHourlyData] = useState(mockHourly)
+  const [liveStats, setLiveStats] = useState<{ label: string; value: number; icon: string; color: string }[] | null>(null)
+  const [agentInfo, setAgentInfo] = useState<{ status: string; uptime: number; cpu: number; mem: number } | null>(null)
+
+  // Load real data from DAWN API on mount
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      const [apiStats, apiWeekly, apiHourly, apiAgent] = await Promise.all([
+        fetchDashboardStats(),
+        fetchWeeklyChartData(),
+        fetchHourlyChartData(),
+        fetchAgentStatus(),
+      ])
+
+      if (cancelled) return
+
+      if (apiStats) {
+        setLiveStats([
+          { label: 'Tasks Completed', value: apiStats.tasks_completed, icon: 'CheckCircle', color: 'success' },
+          { label: 'Active Tasks', value: apiStats.tasks_in_progress, icon: 'FileText', color: 'accent' },
+          { label: 'Pending Tasks', value: apiStats.tasks_pending, icon: 'Users', color: 'purple' },
+          { label: 'Failed Tasks', value: apiStats.tasks_failed, icon: 'AlertTriangle', color: 'error' },
+        ])
+      }
+
+      if (apiWeekly && apiWeekly.length > 0) {
+        setWeeklyData(apiWeekly.map(d => ({
+          day: d.day,
+          tasks: d.tasks,
+          posts: d.posts,
+          leads: d.leads,
+        })))
+      }
+
+      if (apiHourly && apiHourly.length > 0) {
+        setHourlyData(apiHourly.map(d => ({
+          hour: d.hour,
+          value: d.value,
+        })))
+      }
+
+      if (apiAgent) {
+        setAgentInfo({
+          status: apiAgent.status,
+          uptime: apiAgent.uptime,
+          cpu: apiAgent.cpu_usage,
+          mem: apiAgent.memory_usage,
+        })
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [])
 
   const handleRefresh = () => {
     setRefreshing(true)
@@ -46,6 +103,8 @@ export default function DashboardPage() {
       refreshStats()
     }, 1500)
   }
+
+  const displayStats = liveStats || stats
 
   return (
     <div className="max-w-content mx-auto px-4 md:px-8 py-6 md:py-8">
@@ -69,9 +128,32 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Agent Status Bar */}
+      {agentInfo && (
+        <div className="mb-6 p-3 rounded-lg bg-accent-light border border-accent/20 flex items-center gap-4 text-[12px]">
+          <div className="flex items-center gap-2">
+            <Bot size={16} className="text-accent" />
+            <span className="font-medium text-accent">DAWN Agent</span>
+          </div>
+          <span className="text-muted">•</span>
+          <span className="text-foreground capitalize">{agentInfo.status}</span>
+          <span className="text-muted">•</span>
+          <div className="flex items-center gap-1 text-muted">
+            <Cpu size={14} />
+            <span>{agentInfo.cpu}% CPU</span>
+          </div>
+          <div className="flex items-center gap-1 text-muted">
+            <HardDrive size={14} />
+            <span>{agentInfo.mem}% MEM</span>
+          </div>
+          <span className="text-muted">•</span>
+          <span className="text-muted">Uptime: {Math.floor(agentInfo.uptime / 3600)}h {Math.floor((agentInfo.uptime % 3600) / 60)}m</span>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-        {stats.map(stat => (
+        {displayStats.map(stat => (
           <Card key={stat.label} className="p-4 md:p-5">
             <div className="flex items-center gap-3">
               <div className={colorMap[stat.color]}>
