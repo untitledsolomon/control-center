@@ -19,7 +19,7 @@ import {
   MessageSquarePlus, CheckCheck, Loader2, AlertTriangle
 } from 'lucide-react'
 
-// ─── Types ───────────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────
 
 interface ResourceFile {
   id: string
@@ -71,7 +71,7 @@ interface LineCommentReply {
   createdAt: Date
 }
 
-// ─── Mock Data ───────────────────────────────────────────────────────
+// ─── Mock Data ──────────────────────────────────────────────────────
 
 const MOCK_FILES: ResourceFile[] = [
   {
@@ -200,7 +200,7 @@ const MOCK_FILES: ResourceFile[] = [
   },
 ]
 
-// ─── Mock Comments ───────────────────────────────────────────────────
+// ─── Mock Comments ──────────────────────────────────────────────────
 
 const MOCK_COMMENTS: LineComment[] = [
   {
@@ -249,7 +249,7 @@ const MOCK_COMMENTS: LineComment[] = [
   },
 ]
 
-// ─── Helpers ─────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────
 
 const typeIcons: Record<string, React.ReactNode> = {
   Document: <FileText size={16} />,
@@ -372,7 +372,7 @@ function renderMarkdownLine(line: string, index: number): { html: string; key: n
   return { html: `<p class="text-[13px] text-foreground leading-relaxed">${html}</p>`, key: index }
 }
 
-// ─── Line Comment Sidebar Component ─────────────────────────────────
+// ─── Line Comment Thread Component ──────────────────────────────────
 
 function LineCommentThread({
   comment,
@@ -669,7 +669,6 @@ function MarkdownPreview({ content }: { content: string }) {
 
     // Table detection
     if (line.startsWith('|') && lines[index + 1]?.startsWith('|')) {
-      // Check if next line is separator
       if (lines[index + 1]?.includes('---')) {
         const headers = line.split('|').filter(c => c.trim()).map(c => c.trim())
         renderedLines.push({
@@ -678,7 +677,6 @@ function MarkdownPreview({ content }: { content: string }) {
         })
         return
       }
-      // Data row
       const cells = line.split('|').filter(c => c.trim()).map(c => c.trim())
       renderedLines.push({
         html: `<tr>${cells.map(c => `<td class="px-3 py-1.5 text-[12px] text-foreground border-b border-border">${c}</td>`).join('')}</tr>`,
@@ -713,7 +711,395 @@ function MarkdownPreview({ content }: { content: string }) {
   )
 }
 
-// ─── Main Page Component ─────────────────────────────────────────────
+// ─── File Viewer Modal ──────────────────────────────────────────────
+
+function FileViewerModal({
+  file,
+  fileContent,
+  loadingFile,
+  isEditing,
+  editedContent,
+  comments,
+  showComments,
+  showHistory,
+  activeTab,
+  unresolvedCount,
+  fileComments,
+  onClose,
+  onStartEdit,
+  onSave,
+  onCancelEdit,
+  onToggleComments,
+  onToggleHistory,
+  onSetActiveTab,
+  onAddComment,
+  onResolveComment,
+  onReplyToComment,
+  onDeleteComment,
+  onNewCommentLine,
+}: {
+  file: ResourceFile
+  fileContent: string | null
+  loadingFile: boolean
+  isEditing: boolean
+  editedContent: string
+  comments: LineComment[]
+  showComments: boolean
+  showHistory: boolean
+  activeTab: 'preview' | 'edit' | 'comments'
+  unresolvedCount: number
+  fileComments: LineComment[]
+  onClose: () => void
+  onStartEdit: () => void
+  onSave: (content: string) => void
+  onCancelEdit: () => void
+  onToggleComments: () => void
+  onToggleHistory: () => void
+  onSetActiveTab: (tab: 'preview' | 'edit' | 'comments') => void
+  onAddComment: (lineNumber: number) => void
+  onResolveComment: (id: string) => void
+  onReplyToComment: (id: string, body: string) => void
+  onDeleteComment: (id: string) => void
+  onNewCommentLine: (line: number | null) => void
+}) {
+  const ext = getFileExtension(file.title)
+  const editable = isEditable(ext)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-5xl max-h-[85vh] bg-base border border-border rounded-xl shadow-2xl flex flex-col z-10 animate-fade-in">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={onClose}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-raised text-muted hover:text-foreground transition-colors shrink-0"
+            >
+              <ArrowLeft size={14} />
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-[14px] font-semibold text-foreground truncate">{file.title}</h2>
+                <span className={cn(
+                  'px-1.5 py-0.5 rounded text-[9px] font-mono font-medium',
+                  extColors[ext] || 'bg-surface-raised text-muted'
+                )}>
+                  .{ext}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-accent-light text-accent text-[9px] font-medium">
+                  v{file.version}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-muted mt-0.5">
+                <span className="flex items-center gap-1">
+                  <User size={9} />
+                  {file.uploadedBy}
+                </span>
+                <span>Uploaded {formatRelativeTime(file.createdAt)}</span>
+                <span>·</span>
+                <span className="flex items-center gap-1">
+                  <Edit3 size={9} />
+                  {file.lastEditedBy}
+                </span>
+                <span>Edited {formatRelativeTime(file.updatedAt)}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {editable && !isEditing && (
+              <button
+                onClick={onStartEdit}
+                className="px-2.5 py-1.5 text-[11px] font-medium bg-accent text-white rounded hover:bg-accent/90 transition-colors flex items-center gap-1.5"
+              >
+                <Edit3 size={12} />
+                Edit
+              </button>
+            )}
+            <button
+              onClick={onToggleHistory}
+              className={cn(
+                'w-7 h-7 flex items-center justify-center rounded transition-colors',
+                showHistory ? 'bg-accent-light text-accent' : 'hover:bg-surface-raised text-muted hover:text-foreground'
+              )}
+              title="Edit history"
+            >
+              <History size={13} />
+            </button>
+            <button
+              onClick={onToggleComments}
+              className={cn(
+                'w-7 h-7 flex items-center justify-center rounded transition-colors relative',
+                showComments ? 'bg-accent-light text-accent' : 'hover:bg-surface-raised text-muted hover:text-foreground'
+              )}
+              title="Toggle comments"
+            >
+              <MessageCircle size={13} />
+              {unresolvedCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-warning text-[8px] font-bold text-white flex items-center justify-center">
+                  {unresolvedCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Tabs (only for editable files) */}
+        {editable && !isEditing && (
+          <div className="flex items-center border-b border-border px-5 shrink-0">
+            <button
+              onClick={() => onSetActiveTab('preview')}
+              className={cn(
+                'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors',
+                activeTab === 'preview' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
+              )}
+            >
+              Preview
+            </button>
+            <button
+              onClick={() => onSetActiveTab('edit')}
+              className={cn(
+                'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors',
+                activeTab === 'edit' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
+              )}
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => onSetActiveTab('comments')}
+              className={cn(
+                'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors flex items-center gap-1.5',
+                activeTab === 'comments' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
+              )}
+            >
+              <MessageCircle size={11} />
+              Comments
+              {unresolvedCount > 0 && (
+                <span className="px-1 py-0.5 rounded-full bg-warning/20 text-warning text-[9px] font-medium">{unresolvedCount}</span>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Content area */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {/* Main content */}
+          <div className={cn('flex-1 overflow-y-auto', showComments && activeTab !== 'comments' ? 'border-r border-border' : '')}>
+            {loadingFile ? (
+              <div className="p-6 space-y-3 animate-pulse">
+                <div className="h-5 bg-surface-raised rounded w-3/4" />
+                <div className="h-3 bg-surface-raised rounded w-1/2" />
+                <div className="h-3 bg-surface-raised rounded w-5/6" />
+                <div className="h-3 bg-surface-raised rounded w-2/3" />
+                <div className="h-3 bg-surface-raised rounded w-4/5" />
+              </div>
+            ) : isEditing ? (
+              <div className="p-4">
+                <FileEditor
+                  file={file}
+                  content={editedContent}
+                  onSave={onSave}
+                  onCancel={onCancelEdit}
+                />
+              </div>
+            ) : fileContent ? (
+              <div className="p-5">
+                {activeTab === 'comments' ? (
+                  /* Comments full view */
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-[13px] font-semibold text-foreground">
+                        Comments ({fileComments.length})
+                      </h3>
+                      {unresolvedCount > 0 && (
+                        <span className="text-[11px] text-warning">{unresolvedCount} unresolved</span>
+                      )}
+                    </div>
+                    {fileComments.length === 0 ? (
+                      <div className="text-center py-8">
+                        <MessageSquare size={24} className="mx-auto text-muted mb-2" />
+                        <p className="text-[12px] text-muted">No comments yet. Select a line in the file to add one.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {fileComments.map(comment => (
+                          <LineCommentThread
+                            key={comment.id}
+                            comment={comment}
+                            onResolve={onResolveComment}
+                            onReply={onReplyToComment}
+                            onDelete={onDeleteComment}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Preview view with line numbers */
+                  <div className="relative">
+                    <div className="flex">
+                      <div className="select-none text-right text-[11px] font-mono text-muted/30 leading-[22px] pr-3 shrink-0">
+                        {fileContent.split('\n').map((_, i) => (
+                          <div
+                            key={i}
+                            className="relative group cursor-pointer hover:text-accent transition-colors"
+                            onClick={() => {
+                              onNewCommentLine(i + 1)
+                              onSetActiveTab('comments')
+                            }}
+                            title="Comment on this line"
+                          >
+                            {i + 1}
+                            <span className="absolute -left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <MessageSquarePlus size={10} className="text-accent" />
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {ext === 'md' ? (
+                          <MarkdownPreview content={fileContent} />
+                        ) : (
+                          <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">
+                            {fileContent}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-40 text-muted p-6">
+                <p className="text-[13px]">Select a resource to view its contents</p>
+              </div>
+            )}
+          </div>
+
+          {/* Comments sidebar (320px, slide-in from right) */}
+          {showComments && !isEditing && activeTab !== 'comments' && (
+            <div className="w-[320px] shrink-0 overflow-y-auto bg-surface/30">
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[12px] font-semibold text-foreground flex items-center gap-1.5">
+                    <MessageCircle size={12} />
+                    Comments
+                  </h3>
+                  <span className="text-[10px] text-muted">
+                    {unresolvedCount > 0 ? `${unresolvedCount} open` : 'All resolved'}
+                  </span>
+                </div>
+
+                {fileComments.length === 0 ? (
+                  <div className="text-center py-6">
+                    <MessageSquare size={20} className="mx-auto text-muted mb-2" />
+                    <p className="text-[11px] text-muted">No comments yet</p>
+                    <p className="text-[10px] text-muted mt-1">Click a line number to add one</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {fileComments.slice(0, 10).map(comment => (
+                      <LineCommentThread
+                        key={comment.id}
+                        comment={comment}
+                        onResolve={onResolveComment}
+                        onReply={onReplyToComment}
+                        onDelete={onDeleteComment}
+                      />
+                    ))}
+                    {fileComments.length > 10 && (
+                      <button
+                        onClick={() => onSetActiveTab('comments')}
+                        className="w-full text-center text-[11px] text-accent hover:underline py-2"
+                      >
+                        View all {fileComments.length} comments
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* File metadata footer */}
+        <div className="flex items-center justify-between px-5 py-2.5 border-t border-border bg-surface/30 shrink-0">
+          <div className="flex items-center gap-4 text-[10px] text-muted">
+            <span className="flex items-center gap-1">
+              <User size={10} />
+              Uploaded by {file.uploadedBy}
+            </span>
+            <span className="flex items-center gap-1">
+              <Calendar size={10} />
+              {formatDate(file.createdAt)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Edit3 size={10} />
+              Last edited by {file.lastEditedBy}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock3 size={10} />
+              {formatRelativeTime(file.updatedAt)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Hash size={10} />
+              v{file.version}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {file.tags.map(tag => (
+              <span key={tag} className="px-1.5 py-0.5 rounded bg-surface-raised text-[9px] text-muted">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Edit history panel (inside modal, below content) */}
+        {showHistory && (
+          <div className="border-t border-border p-4 bg-surface/20 shrink-0 max-h-[200px] overflow-y-auto">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[13px] font-semibold text-foreground flex items-center gap-1.5">
+                <History size={13} />
+                Edit History
+              </h3>
+              <button
+                onClick={onToggleHistory}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-raised text-muted transition-colors"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {file.editHistory.slice().reverse().map((entry, i) => (
+                <div key={i} className="flex items-start gap-3 pb-2 border-b border-border last:border-0 last:pb-0">
+                  <div className="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {entry.editedBy[0]}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] font-semibold text-foreground">{entry.editedBy}</span>
+                      <span className="text-[10px] text-muted">{formatRelativeTime(entry.editedAt)}</span>
+                      <span className="px-1 py-0.5 rounded bg-surface-raised text-[9px] text-muted font-mono">
+                        v{entry.version}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-foreground/70 mt-0.5">{entry.summary}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Page Component ────────────────────────────────────────────
 
 export default function ResourcesPage() {
   const { state, addNotification, addActivity } = useAppState()
@@ -922,413 +1308,106 @@ export default function ResourcesPage() {
         </div>
       </div>
 
-      {/* Main layout: file list + viewer */}
-      <div className="flex gap-4">
-        {/* File list */}
-        <div className={cn('space-y-2', selectedFile ? 'w-[380px] shrink-0' : 'flex-1')}>
-          {filtered.length === 0 ? (
-            <Card className="p-8 text-center">
-              <FolderOpen size={40} className="mx-auto text-muted mb-3" />
-              <p className="text-[14px] text-muted">No resources found.</p>
-              <Button variant="secondary" size="sm" className="mt-3" onClick={() => setShowUploadModal(true)}>
-                <Plus size={14} />
-                Upload your first resource
-              </Button>
-            </Card>
-          ) : (
-            filtered.map(resource => {
-              const ext = getFileExtension(resource.title)
-              const fileCommentCount = comments.filter(c => c.fileId === resource.id).length
-              const fileUnresolved = comments.filter(c => c.fileId === resource.id && !c.resolved).length
+      {/* File list (full width when no file selected) */}
+      <div className="space-y-2">
+        {filtered.length === 0 ? (
+          <Card className="p-8 text-center">
+            <FolderOpen size={40} className="mx-auto text-muted mb-3" />
+            <p className="text-[14px] text-muted">No resources found.</p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={() => setShowUploadModal(true)}>
+              <Plus size={14} />
+              Upload your first resource
+            </Button>
+          </Card>
+        ) : (
+          filtered.map(resource => {
+            const ext = getFileExtension(resource.title)
+            const fileCommentCount = comments.filter(c => c.fileId === resource.id).length
+            const fileUnresolved = comments.filter(c => c.fileId === resource.id && !c.resolved).length
 
-              return (
-                <div
-                  key={resource.id}
-                  className={cn(
-                    'bg-base border border-border rounded-[8px] p-3 flex items-center gap-3 transition-colors cursor-pointer',
-                    selectedFile?.id === resource.id ? 'border-accent/50 bg-accent/5' : 'hover:border-accent/30'
-                  )}
-                  onClick={() => handleOpen(resource)}
-                >
-                  <div className={cn(
-                    'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
-                    extColors[ext] || typeColors[resource.type] || 'bg-surface-raised text-muted'
-                  )}>
-                    {ext === 'md' ? <FileText size={15} /> : ext === 'pdf' ? <FileText size={15} /> : ext === 'csv' || ext === 'xlsx' ? <FileSpreadsheet size={15} /> : ext === 'zip' ? <FolderOpen size={15} /> : typeIcons[resource.type] || <FileText size={15} />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[12px] font-semibold text-foreground truncate">{resource.title}</h3>
-                      {isEditable(ext) && (
-                        <FileEdit size={10} className="text-muted shrink-0" />
-                      )}
-                    </div>
-                    <p className="text-[10px] text-muted mt-0.5 line-clamp-1">{resource.description}</p>
-                    <div className="flex items-center gap-2 text-[10px] text-muted mt-1">
-                      <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono', extColors[ext] || 'bg-surface-raised text-muted')}>
-                        .{ext}
-                      </span>
-                      <span>{resource.size}</span>
-                      <span>v{resource.version}</span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1">
-                        <User size={9} />
-                        {resource.lastEditedBy}
-                      </span>
-                      {fileCommentCount > 0 && (
-                        <>
-                          <span>·</span>
-                          <span className={cn(
-                            'flex items-center gap-1',
-                            fileUnresolved > 0 ? 'text-warning' : 'text-muted'
-                          )}>
-                            <MessageCircle size={9} />
-                            {fileUnresolved > 0 ? `${fileUnresolved} open` : `${fileCommentCount}`}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight size={14} className="text-muted shrink-0" />
-                </div>
-              )
-            })
-          )}
-        </div>
-
-        {/* File viewer */}
-        {selectedFile && (
-          <div className="flex-1 min-w-0">
-            <div className="bg-base border border-border rounded-xl overflow-hidden">
-              {/* Viewer header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <div className="flex items-center gap-3 min-w-0">
-                  <button
-                    onClick={() => { setSelectedFile(null); setFileContent(null); setIsEditing(false) }}
-                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-raised text-muted hover:text-foreground transition-colors shrink-0"
-                  >
-                    <ArrowLeft size={14} />
-                  </button>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-[14px] font-semibold text-foreground truncate">{selectedFile.title}</h2>
-                      <span className={cn(
-                        'px-1.5 py-0.5 rounded text-[9px] font-mono font-medium',
-                        extColors[getFileExtension(selectedFile.title)] || 'bg-surface-raised text-muted'
-                      )}>
-                        .{getFileExtension(selectedFile.title)}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded bg-accent-light text-accent text-[9px] font-medium">
-                        v{selectedFile.version}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] text-muted mt-0.5">
-                      <span className="flex items-center gap-1">
-                        <User size={9} />
-                        {selectedFile.uploadedBy}
-                      </span>
-                      <span>Uploaded {formatRelativeTime(selectedFile.createdAt)}</span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1">
-                        <Edit3 size={9} />
-                        {selectedFile.lastEditedBy}
-                      </span>
-                      <span>Edited {formatRelativeTime(selectedFile.updatedAt)}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {/* Edit button (only for editable files) */}
-                  {isEditable(getFileExtension(selectedFile.title)) && !isEditing && (
-                    <button
-                      onClick={() => { setIsEditing(true); setEditedContent(fileContent || ''); setActiveTab('edit') }}
-                      className="px-2.5 py-1.5 text-[11px] font-medium bg-accent text-white rounded hover:bg-accent/90 transition-colors flex items-center gap-1.5"
-                    >
-                      <Edit3 size={12} />
-                      Edit
-                    </button>
-                  )}
-                  {/* History button */}
-                  <button
-                    onClick={() => setShowHistory(!showHistory)}
-                    className={cn(
-                      'w-7 h-7 flex items-center justify-center rounded transition-colors',
-                      showHistory ? 'bg-accent-light text-accent' : 'hover:bg-surface-raised text-muted hover:text-foreground'
-                    )}
-                    title="Edit history"
-                  >
-                    <History size={13} />
-                  </button>
-                  {/* Comments toggle */}
-                  <button
-                    onClick={() => setShowComments(!showComments)}
-                    className={cn(
-                      'w-7 h-7 flex items-center justify-center rounded transition-colors relative',
-                      showComments ? 'bg-accent-light text-accent' : 'hover:bg-surface-raised text-muted hover:text-foreground'
-                    )}
-                    title="Toggle comments"
-                  >
-                    <MessageCircle size={13} />
-                    {unresolvedCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-warning text-[8px] font-bold text-white flex items-center justify-center">
-                        {unresolvedCount}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Tabs (only for editable files) */}
-              {isEditable(getFileExtension(selectedFile.title)) && !isEditing && (
-                <div className="flex items-center border-b border-border px-4">
-                  <button
-                    onClick={() => setActiveTab('preview')}
-                    className={cn(
-                      'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors',
-                      activeTab === 'preview' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
-                    )}
-                  >
-                    Preview
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('edit')}
-                    className={cn(
-                      'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors',
-                      activeTab === 'edit' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
-                    )}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('comments')}
-                    className={cn(
-                      'px-3 py-2 text-[11px] font-medium border-b-2 transition-colors flex items-center gap-1.5',
-                      activeTab === 'comments' ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground'
-                    )}
-                  >
-                    <MessageCircle size={11} />
-                    Comments
-                    {unresolvedCount > 0 && (
-                      <span className="px-1 py-0.5 rounded-full bg-warning/20 text-warning text-[9px] font-medium">{unresolvedCount}</span>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {/* Content area */}
-              <div className="flex">
-                {/* Main content */}
-                <div className={cn('flex-1 min-w-0', showComments ? 'border-r border-border' : '')}>
-                  {loadingFile ? (
-                    <div className="p-6 space-y-3 animate-pulse">
-                      <div className="h-5 bg-surface-raised rounded w-3/4" />
-                      <div className="h-3 bg-surface-raised rounded w-1/2" />
-                      <div className="h-3 bg-surface-raised rounded w-5/6" />
-                      <div className="h-3 bg-surface-raised rounded w-2/3" />
-                      <div className="h-3 bg-surface-raised rounded w-4/5" />
-                    </div>
-                  ) : isEditing ? (
-                    <FileEditor
-                      file={selectedFile}
-                      content={editedContent}
-                      onSave={handleSave}
-                      onCancel={() => setIsEditing(false)}
-                    />
-                  ) : fileContent ? (
-                    <div className="p-5 overflow-y-auto max-h-[65vh]">
-                      {activeTab === 'comments' ? (
-                        /* Comments view */
-                        <div>
-                          <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-[13px] font-semibold text-foreground">
-                              Comments ({fileComments.length})
-                            </h3>
-                            {unresolvedCount > 0 && (
-                              <span className="text-[11px] text-warning">{unresolvedCount} unresolved</span>
-                            )}
-                          </div>
-                          {fileComments.length === 0 ? (
-                            <div className="text-center py-8">
-                              <MessageSquare size={24} className="mx-auto text-muted mb-2" />
-                              <p className="text-[12px] text-muted">No comments yet. Select a line in the file to add one.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              {fileComments.map(comment => (
-                                <LineCommentThread
-                                  key={comment.id}
-                                  comment={comment}
-                                  onResolve={handleResolveComment}
-                                  onReply={handleReplyToComment}
-                                  onDelete={handleDeleteComment}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        /* Preview view */
-                        <div className="relative">
-                          {/* Line numbers with comment buttons */}
-                          <div className="flex">
-                            <div className="select-none text-right text-[11px] font-mono text-muted/30 leading-[22px] pr-3 shrink-0">
-                              {fileContent.split('\n').map((_, i) => (
-                                <div
-                                  key={i}
-                                  className="relative group cursor-pointer hover:text-accent transition-colors"
-                                  onClick={() => {
-                                    setNewCommentLine(i + 1)
-                                    setNewCommentText('')
-                                    setActiveTab('comments')
-                                  }}
-                                  title="Comment on this line"
-                                >
-                                  {i + 1}
-                                  <span className="absolute -left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <MessageSquarePlus size={10} className="text-accent" />
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              {getFileExtension(selectedFile.title) === 'md' ? (
-                                <MarkdownPreview content={fileContent} />
-                              ) : (
-                                <pre className="text-[12px] font-mono text-foreground leading-[22px] whitespace-pre-wrap">
-                                  {fileContent}
-                                </pre>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-40 text-muted p-6">
-                      <p className="text-[13px]">Select a resource to view its contents</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Comments sidebar */}
-                {showComments && !isEditing && activeTab !== 'comments' && (
-                  <div className="w-[320px] shrink-0 overflow-y-auto max-h-[65vh]">
-                    <div className="p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-[12px] font-semibold text-foreground flex items-center gap-1.5">
-                          <MessageCircle size={12} />
-                          Comments
-                        </h3>
-                        <span className="text-[10px] text-muted">
-                          {unresolvedCount > 0 ? `${unresolvedCount} open` : 'All resolved'}
-                        </span>
-                      </div>
-
-                      {fileComments.length === 0 ? (
-                        <div className="text-center py-6">
-                          <MessageSquare size={20} className="mx-auto text-muted mb-2" />
-                          <p className="text-[11px] text-muted">No comments yet</p>
-                          <p className="text-[10px] text-muted mt-1">Click a line number to add one</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {fileComments.slice(0, 10).map(comment => (
-                            <LineCommentThread
-                              key={comment.id}
-                              comment={comment}
-                              onResolve={handleResolveComment}
-                              onReply={handleReplyToComment}
-                              onDelete={handleDeleteComment}
-                            />
-                          ))}
-                          {fileComments.length > 10 && (
-                            <button
-                              onClick={() => setActiveTab('comments')}
-                              className="w-full text-center text-[11px] text-accent hover:underline py-2"
-                            >
-                              View all {fileComments.length} comments
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+            return (
+              <div
+                key={resource.id}
+                className={cn(
+                  'bg-base border border-border rounded-[8px] p-3 flex items-center gap-3 transition-colors cursor-pointer',
+                  selectedFile?.id === resource.id ? 'border-accent/50 bg-accent/5' : 'hover:border-accent/30'
                 )}
-              </div>
-
-              {/* File metadata footer */}
-              <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-surface/30">
-                <div className="flex items-center gap-4 text-[10px] text-muted">
-                  <span className="flex items-center gap-1">
-                    <User size={10} />
-                    Uploaded by {selectedFile.uploadedBy}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Calendar size={10} />
-                    {formatDate(selectedFile.createdAt)}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Edit3 size={10} />
-                    Last edited by {selectedFile.lastEditedBy}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock3 size={10} />
-                    {formatRelativeTime(selectedFile.updatedAt)}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Hash size={10} />
-                    v{selectedFile.version}
-                  </span>
+                onClick={() => handleOpen(resource)}
+              >
+                <div className={cn(
+                  'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
+                  extColors[ext] || typeColors[resource.type] || 'bg-surface-raised text-muted'
+                )}>
+                  {ext === 'md' ? <FileText size={15} /> : ext === 'pdf' ? <FileText size={15} /> : ext === 'csv' || ext === 'xlsx' ? <FileSpreadsheet size={15} /> : ext === 'zip' ? <FolderOpen size={15} /> : typeIcons[resource.type] || <FileText size={15} />}
                 </div>
-                <div className="flex items-center gap-2">
-                  {selectedFile.tags.map(tag => (
-                    <span key={tag} className="px-1.5 py-0.5 rounded bg-surface-raised text-[9px] text-muted">
-                      {tag}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[12px] font-semibold text-foreground truncate">{resource.title}</h3>
+                    {isEditable(ext) && (
+                      <FileEdit size={10} className="text-muted shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted mt-0.5 line-clamp-1">{resource.description}</p>
+                  <div className="flex items-center gap-2 text-[10px] text-muted mt-1">
+                    <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono', extColors[ext] || 'bg-surface-raised text-muted')}>
+                      .{ext}
                     </span>
-                  ))}
+                    <span>{resource.size}</span>
+                    <span>v{resource.version}</span>
+                    <span>·</span>
+                    <span className="flex items-center gap-1">
+                      <User size={9} />
+                      {resource.lastEditedBy}
+                    </span>
+                    {fileCommentCount > 0 && (
+                      <>
+                        <span>·</span>
+                        <span className={cn(
+                          'flex items-center gap-1',
+                          fileUnresolved > 0 ? 'text-warning' : 'text-muted'
+                        )}>
+                          <MessageCircle size={9} />
+                          {fileUnresolved > 0 ? `${fileUnresolved} open` : `${fileCommentCount}`}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
+                <ChevronRight size={14} className="text-muted shrink-0" />
               </div>
-            </div>
-
-            {/* Edit history panel */}
-            {showHistory && (
-              <div className="mt-3 bg-base border border-border rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-[13px] font-semibold text-foreground flex items-center gap-1.5">
-                    <History size={13} />
-                    Edit History
-                  </h3>
-                  <button
-                    onClick={() => setShowHistory(false)}
-                    className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-raised text-muted transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {selectedFile.editHistory.slice().reverse().map((entry, i) => (
-                    <div key={i} className="flex items-start gap-3 pb-2 border-b border-border last:border-0 last:pb-0">
-                      <div className="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center text-[10px] font-bold shrink-0">
-                        {entry.editedBy[0]}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] font-semibold text-foreground">{entry.editedBy}</span>
-                          <span className="text-[10px] text-muted">{formatRelativeTime(entry.editedAt)}</span>
-                          <span className="px-1 py-0.5 rounded bg-surface-raised text-[9px] text-muted font-mono">
-                            v{entry.version}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-foreground/70 mt-0.5">{entry.summary}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            )
+          })
         )}
       </div>
+
+      {/* File Viewer Modal */}
+      {selectedFile && (
+        <FileViewerModal
+          file={selectedFile}
+          fileContent={fileContent}
+          loadingFile={loadingFile}
+          isEditing={isEditing}
+          editedContent={editedContent}
+          comments={comments}
+          showComments={showComments}
+          showHistory={showHistory}
+          activeTab={activeTab}
+          unresolvedCount={unresolvedCount}
+          fileComments={fileComments}
+          onClose={() => { setSelectedFile(null); setFileContent(null); setIsEditing(false) }}
+          onStartEdit={() => { setIsEditing(true); setEditedContent(fileContent || ''); setActiveTab('edit') }}
+          onSave={handleSave}
+          onCancelEdit={() => setIsEditing(false)}
+          onToggleComments={() => setShowComments(!showComments)}
+          onToggleHistory={() => setShowHistory(!showHistory)}
+          onSetActiveTab={setActiveTab}
+          onAddComment={handleAddComment}
+          onResolveComment={handleResolveComment}
+          onReplyToComment={handleReplyToComment}
+          onDeleteComment={handleDeleteComment}
+          onNewCommentLine={setNewCommentLine}
+        />
+      )}
 
       {/* Upload Modal */}
       {showUploadModal && (
