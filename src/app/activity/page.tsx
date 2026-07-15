@@ -4,7 +4,7 @@ import React from 'react'
 import { useApp } from '@/store/AppContext'
 import { Activity, AlertCircle, AlertTriangle, CheckCircle, Info } from 'lucide-react'
 
-const severityConfig = {
+const severityConfig: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
   error: { icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-500/10' },
   warning: { icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-500/10' },
   success: { icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
@@ -24,7 +24,7 @@ export default function ActivityPage() {
 
       <div className="space-y-1">
         {activityLogs.map(log => {
-          const config = severityConfig[log.severity]
+          const config = severityConfig[log.severity] || severityConfig.info
           const Icon = config.icon
           return (
             <div
