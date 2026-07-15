@@ -38,6 +38,9 @@ export interface Notification {
   icon: string
   title: string
   description: string
+  message?: string
+  source?: string
+  read?: boolean
   timestamp: Date
   screen: string
 }
