@@ -202,3 +202,25 @@ ALTER TABLE jarvis_settings ENABLE ROW LEVEL SECURITY;
 
 -- Allow anon full access
 CREATE POLICY "Allow anon full access" ON jarvis_settings FOR ALL USING (true) WITH CHECK (true);
+
+-- 12. Resource Comments (for line-level commenting on resources)
+CREATE TABLE IF NOT EXISTS resource_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_id TEXT NOT NULL,
+  line_number INTEGER NOT NULL,
+  author TEXT NOT NULL DEFAULT 'Solomon',
+  author_role TEXT NOT NULL DEFAULT 'solomon' CHECK (author_role IN ('solomon', 'dawn', 'agent', 'team')),
+  body TEXT NOT NULL,
+  resolved BOOLEAN NOT NULL DEFAULT false,
+  resolved_by TEXT,
+  resolved_at TIMESTAMPTZ,
+  replies JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_comments_file ON resource_comments(file_id);
+CREATE INDEX IF NOT EXISTS idx_resource_comments_created ON resource_comments(created_at DESC);
+
+ALTER TABLE resource_comments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow anon full access" ON resource_comments FOR ALL USING (true) WITH CHECK (true);
