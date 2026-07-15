@@ -43,6 +43,22 @@ interface AppState {
   error: string | null
 }
 
+const INITIAL_STATS: DashboardStats = {
+  total_tasks: 0,
+  tasks_completed: 0,
+  tasks_pending: 0,
+  tasks_in_progress: 0,
+  tasks_failed: 0,
+  active_goals: 0,
+  goal_progress_avg: 0,
+  notifications_unread: 0,
+  system_uptime: 0,
+  agent_status: 'active',
+  last_active: new Date().toISOString(),
+  memory_usage: 0,
+  cpu_usage: 0,
+}
+
 const initialState: AppState = {
   stats: null,
   weeklyActivity: [],
@@ -120,7 +136,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'MARK_NOTIFICATION_READ':
       return {
         ...state,
-        notifications: state.notifications.map(n =>
+        notifications: state.notifications.map((n: Notification) =>
           n.id === action.payload ? { ...n, read: true } : n
         ),
       }
@@ -129,7 +145,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_TASK':
       return {
         ...state,
-        tasks: state.tasks.map(t =>
+        tasks: state.tasks.map((t: Task) =>
           t.id === action.payload.id ? { ...t, ...action.payload.updates } : t
         ),
       }
@@ -138,7 +154,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_GOAL':
       return {
         ...state,
-        goals: state.goals.map(g =>
+        goals: state.goals.map((g: Goal) =>
           g.id === action.payload.id ? { ...g, ...action.payload.updates } : g
         ),
       }
@@ -147,7 +163,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_PLAYBOOK':
       return {
         ...state,
-        playbooks: state.playbooks.map(p =>
+        playbooks: state.playbooks.map((p: Playbook) =>
           p.id === action.payload.id ? { ...p, ...action.payload.updates } : p
         ),
       }
@@ -156,7 +172,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_SCHEDULE':
       return {
         ...state,
-        schedules: state.schedules.map(s =>
+        schedules: state.schedules.map((s: Schedule) =>
           s.id === action.payload.id ? { ...s, ...action.payload.updates } : s
         ),
       }
